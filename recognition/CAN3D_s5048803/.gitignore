@@ -1,0 +1,27 @@
+# General macOS files
+.DS_Store
+.localized
+__MACOSX/
+.AppleDouble
+.LSOverride
+Icon
+
+# Resource forks
+._*
+
+# Files that may appear on external disks / volumes
+.Spotlight-V100
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.com.apple.timemachine.supported
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+
+# Remote AFP share directories
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
