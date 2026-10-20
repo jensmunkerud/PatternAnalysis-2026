@@ -8,3 +8,14 @@ using a Context Aggregate Network (CAN) keeps every layer at full resolution, bu
 has a 'dilation' in the convolutional layers to increase the receptive field and
 keep the memory somewhat manageable. The network will be made up of a daisy chain of
 'dilated blocks', that each perform convolution, normalization and relu activation (leaky).
+The dilation in each block grows, increasing the receptive field.
+
+
+
+## Memory usage
+Each layer in the CAN stores Width * D * H * W values.
+
+
+## Artificial Intelligence Usage Disclosure
+* I have used Claude
+* It helped me
