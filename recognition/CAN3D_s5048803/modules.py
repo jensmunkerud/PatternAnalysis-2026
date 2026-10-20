@@ -1,3 +1,10 @@
+"""
+modules.py: Containing the source code of the components of your model. Each component must be
+implemented as a class or a function in PyTorch or TensorFlow/Keras. Your implementation of the
+model should not depend on NumPy (or other Python libraries not part of PyTorch / TensorFlow)
+in any way unless otherwise approved by the teaching staff.
+"""
+
 import torch.nn as nn
 
 KERNEL_SIZE 		= 3
@@ -18,7 +25,7 @@ class DilatedBlock(nn.Module):
 		return self.act(self.norm(self.conv(x)))
 
 # The network: A daisychain of 5 DilatedBlocks with increasing dilations to improve receptive field.
-# An initial convolutional layer
+# An output convolutional layer turning the NETWORK_WIDTH feature maps into 6 classes.
 # Works for both 2d and 3d
 class CAN(nn.Module):
 	"""
