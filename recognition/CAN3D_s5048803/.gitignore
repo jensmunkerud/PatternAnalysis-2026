@@ -1,4 +1,8 @@
-HipMRI_study_complete_release_v1
+**/HipMRI_2D
+**/HipMRI_3D
+**/__pycache__
+.vscode/
+.vscode/*
 
 # General macOS files
 .DS_Store
