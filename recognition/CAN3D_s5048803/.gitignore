@@ -3,6 +3,7 @@
 **/__pycache__
 .vscode/
 .vscode/*
+.vscode
 
 # General macOS files
 .DS_Store

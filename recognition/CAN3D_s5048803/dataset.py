@@ -1,6 +1,13 @@
 import numpy as np
 import nibabel as nib
 from tqdm import tqdm
+import os, glob
+
+def get_paths(root):
+	imgs = sorted(glob.glob(os.path.join(root, "semantics_MRs*", "*.nii.gz")))
+	lbls = sorted(glob.glob(os.path.join(root, "semantics_labels*", "*.nii.gz")))
+	return imgs, lbls
+
 
 def to_channels(arr: np.ndarray, dtype=np.uint8) -> np.ndarray:
 	channels = np.unique(arr)
