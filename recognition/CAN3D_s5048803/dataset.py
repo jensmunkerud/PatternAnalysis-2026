@@ -2,132 +2,86 @@
 dataset.py: Containing the data loader for loading and preprocessing your data, including leakagefree train/validation/test splitting functions and data augmentations.
 """
 
+import os, glob, re, random
 import numpy as np
 import nibabel as nib
-from tqdm import tqdm
-import os, glob
+import torch
+import torch.nn.functional as F
+from torch.utils.data import Dataset
 
-def get_paths(root):
-	imgs = sorted(glob.glob(os.path.join(root, "semantics_MRs*", "*.nii.gz")))
-	lbls = sorted(glob.glob(os.path.join(root, "semantics_labels*", "*.nii.gz")))
-	return imgs, lbls
+NUM_CLASSES = 6
 
+# Do export RANGPUR_MODE=1 in the slurm script before calling the python code to set correct filepaths
+RANGPUR_MODE = os.environ.get("RANGPUR_MODE", "0") == "1"
 
-def to_channels(arr: np.ndarray, dtype=np.uint8) -> np.ndarray:
-	channels = np.unique(arr)
-	res = np.zeros(arr.shape + (len(channels),), dtype=dtype)
-	for c in channels:
-		c = int(c)
-		res[..., c:c+1][arr == c] = 1
-	return res
+# Choosing between the rangpur filelayout or having downloaded the datasets locally
+LAYOUTS = {
+	"local": dict(d2="HipMRI_2D", mr="HipMRI_3D/semantic_MRs_anon",
+				lbl="HipMRI_3D/semantic_labels_anon"),
+	"rangpur": dict(d2="keras_slices_data", mr="semantic_MRs",
+					lbl="semantic_labels_only"),
+}
 
-def load_data_2D(imageNames, normImage=False, categorical=False,
-				 dtype=np.float32, getAffines=False, early_stop=False):
-	'''
-	Load medical image data from names, cases list provided into a list for each.
+def layout():
+	return LAYOUTS["rangpur" if RANGPUR_MODE else "local"]
 
-	This function pre-allocates 4D arrays for conv2d to avoid excessive memory usage.
+def key(path):
+	"""'Case_004_Week0_LFOV.nii.gz' or 'B006_Week1_SEMANTIC.nii.gz' -> ('004'/'006', '0'/'1')."""
+	m = re.search(r"(?:Case_|B)(\d+)_Week(\d+)", os.path.basename(path), re.I)
+	return m.group(1), m.group(2)
 
-	normImage : bool (normalise the image 0.0-1.0)
-	early_stop : Stop loading pre-maturely, leaves arrays mostly empty,
-				 for quick loading and testing scripts.
-	'''
-	affines = []
+def patient_id(pair):
+	return key(pair[0])[0]
 
-	# get fixed size
-	num = len(imageNames)
-	first_case = nib.load(imageNames[0]).get_fdata(caching='unchanged')
-	if len(first_case.shape) == 3:
-		first_case = first_case[:, :, 0]  # sometimes extra dims, remove
-	if categorical:
-		first_case = to_channels(first_case, dtype=dtype)
-		rows, cols, channels = first_case.shape
-		images = np.zeros((num, rows, cols, channels), dtype=dtype)
-	else:
-		rows, cols = first_case.shape
-		images = np.zeros((num, rows, cols), dtype=dtype)
+def get_pairs(root):
+	"""Match every MRI with its label by (patient, week). Returns [(img_path, lbl_path), ...]."""
+	L = layout()
+	imgs = glob.glob(os.path.join(root, L["mr"], "*.nii.gz"))
+	lbls = {key(p): p for p in glob.glob(os.path.join(root, L["lbl"], "*.nii.gz"))}
+	pairs = [(i, lbls[key(i)]) for i in sorted(imgs) if key(i) in lbls]
+	assert pairs, f"No image/label pairs under {os.path.join(root, L['mr'])}"
+	return pairs
 
-	for i, inName in enumerate(tqdm(imageNames)):
-		niftiImage = nib.load(inName)
-		inImage = niftiImage.get_fdata(caching='unchanged')  # read disk only
-		affine = niftiImage.affine
-		if len(inImage.shape) == 3:
-			inImage = inImage[:, :, 0]  # sometimes extra dims in HipMRI_study data
-		inImage = inImage.astype(dtype)
-		if normImage:
-			inImage = (inImage - inImage.mean()) / (inImage.std() + 1e-8)
-		if categorical:
-			inImage = to_channels(inImage, dtype=dtype)
-			images[i, :, :, :] = inImage
-		else:
-			images[i, :, :] = inImage
+def split_pairs(root, pairs, seed=42, frac=(0.7, 0.15, 0.15)):
+	"""Patient-level split. Uses the course's 2D train/validate/test patients if available."""
+	d2 = os.path.join(root, layout()["d2"])
+	ids = {}
+	for split, folder in [("train", "keras_slices_train"),
+						  ("val", "keras_slices_validate"),
+						  ("test", "keras_slices_test")]:
+		files = glob.glob(os.path.join(d2, folder, "*.nii.gz"))
+		ids[split] = {re.search(r"(\d+)", os.path.basename(f)).group(1) for f in files}
 
-		affines.append(affine)
-		if i > 20 and early_stop:
-			break
+	if not all(ids.values()):          # 2D folders missing/empty -> random patient split
+		print("WARNING: 2D split not found, using random patient split")
+		pids = sorted({patient_id(p) for p in pairs})
+		random.Random(seed).shuffle(pids)
+		n = len(pids); a, b = int(frac[0] * n), int((frac[0] + frac[1]) * n)
+		ids = {"train": set(pids[:a]), "val": set(pids[a:b]), "test": set(pids[b:])}
 
-	if getAffines:
-		return images, affines
-	else:
-		return images
+	# leakage check: no patient in two splits
+	assert not (ids["train"] & ids["val"] or ids["train"] & ids["test"] or ids["val"] & ids["test"])
+	return {s: [p for p in pairs if patient_id(p) in g] for s, g in ids.items()}
 
+class HipMRI3D(Dataset):
+	"""One (image, label) volume per item: image (1, D, H, W) float, label (D, H, W) long."""
+	def __init__(self, pairs, scale=0.5):
+		self.pairs, self.scale = pairs, scale
 
-def load_data_3D(imageNames, normImage=False, categorical=False,
-				 dtype=np.float32, getAffines=False, orient=False,
-				 early_stop=False):
-	'''
-	Load medical image data from names, cases list provided into a list for each.
+	def __len__(self):
+		return len(self.pairs)
 
-	This function pre-allocates 5D arrays for conv3d to avoid excessive memory usage.
-
-	normImage : bool (normalise the image 0.0-1.0)
-	orient : Apply orientation and resample image? Good for images with
-			 large slice thickness or anisotropic resolution
-	dtype : Type of the data. If dtype=np.uint8, it is assumed that the data is labels
-	early_stop : Stop loading pre-maturely? Leaves arrays mostly empty,
-				 for quick loading and testing scripts.
-	'''
-	affines = []
-
-	interp = 'linear'
-	if dtype == np.uint8:  # assume labels
-		interp = 'nearest'
-
-	# get fixed size
-	num = len(imageNames)
-	niftiImage = nib.load(imageNames[0])
-	first_case = niftiImage.get_fdata(caching='unchanged')
-	if len(first_case.shape) == 4:
-		first_case = first_case[:, :, :, 0]  # sometimes extra dims, remove
-	if categorical:
-		first_case = to_channels(first_case, dtype=dtype)
-		rows, cols, depth, channels = first_case.shape
-		images = np.zeros((num, rows, cols, depth, channels), dtype=dtype)
-	else:
-		rows, cols, depth = first_case.shape
-		images = np.zeros((num, rows, cols, depth), dtype=dtype)
-
-	for i, inName in enumerate(tqdm(imageNames)):
-		niftiImage = nib.load(inName)
-		inImage = niftiImage.get_fdata(caching='unchanged')  # read disk only
-		affine = niftiImage.affine
-		if len(inImage.shape) == 4:
-			inImage = inImage[:, :, :, 0]  # sometimes extra dims in HipMRI_study data
-		inImage = inImage[:, :, :depth]  # clip slices
-		inImage = inImage.astype(dtype)
-		if normImage:
-			inImage = (inImage - inImage.mean()) / (inImage.std() + 1e-8)
-		if categorical:
-			inImage = to_channels(inImage, dtype=dtype)
-			images[i, :inImage.shape[0], :inImage.shape[1], :inImage.shape[2], :] = inImage
-		else:
-			images[i, :inImage.shape[0], :inImage.shape[1], :inImage.shape[2]] = inImage
-
-		affines.append(affine)
-		if i > 20 and early_stop:
-			break
-
-	if getAffines:
-		return images, affines
-	else:
-		return images
+	def __getitem__(self, i):
+		ip, lp = self.pairs[i]
+		img = nib.load(ip).get_fdata(caching="unchanged")
+		lbl = nib.load(lp).get_fdata(caching="unchanged")
+		if img.ndim == 4: img = img[..., 0]
+		if lbl.ndim == 4: lbl = lbl[..., 0]
+		img = (img - img.mean()) / (img.std() + 1e-8)          # z-score per volume
+		# files are (H, W, D); model wants (D, H, W); add batch+channel axes for interpolate
+		img = torch.from_numpy(img.astype(np.float32)).permute(2, 0, 1)[None, None]
+		lbl = torch.from_numpy(np.rint(lbl).astype(np.float32)).permute(2, 0, 1)[None, None]
+		if self.scale != 1:
+			img = F.interpolate(img, scale_factor=self.scale, mode="trilinear", align_corners=False)
+			lbl = F.interpolate(lbl, scale_factor=self.scale, mode="nearest")  # keeps class IDs intact
+		return img[0], lbl[0, 0].long()

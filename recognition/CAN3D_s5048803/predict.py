@@ -4,3 +4,9 @@ weights, run inference on test cases, print out any results, and provide visuali
 (e.g., prediction overlays, generated samples, heatmaps). NumPy is allowed in this script for
 visualization or loading data.
 """
+
+import modules
+
+model = modules.CAN(dim=3)
+for name, p in model.named_parameters():
+	print(name, tuple(p.shape))

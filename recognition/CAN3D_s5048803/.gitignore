@@ -4,6 +4,7 @@
 .vscode/
 .vscode/*
 .vscode
+*.pt
 
 # General macOS files
 .DS_Store
