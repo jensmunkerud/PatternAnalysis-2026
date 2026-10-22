@@ -207,4 +207,5 @@ ax.text(
 )
 
 plt.tight_layout()
-plt.show()
+# plt.show()
+plt.savefig("modelArchitecture")
