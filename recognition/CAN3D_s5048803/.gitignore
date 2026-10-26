@@ -5,6 +5,7 @@
 .vscode/*
 .vscode
 *.pt
+tempCodeRunnerFile.python
 
 # General macOS files
 .DS_Store

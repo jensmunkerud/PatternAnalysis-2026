@@ -21,7 +21,7 @@ def one_hot(t):
 def dice_loss(logits, target, eps=1e-6):
 	probs, onehot = torch.softmax(logits, 1), one_hot(target)
 	dims = (0,) + tuple(range(2, logits.ndim)) # everything except the class axis
-	inter = (probs * onehot).sum(dims)
+	inter = (probs * onehot).sum(dims) # Intersection between prediction and ground-truth
 	denom = probs.sum(dims) + onehot.sum(dims)
 	return 1 - ((2 * inter + eps) / (denom + eps)).mean()
 
@@ -36,15 +36,17 @@ def evaluate(model, loader, device, eps=1e-6):
 		x, y = x.to(device), y.to(device)
 		p, t = one_hot(model(x).argmax(1)), one_hot(y)
 		dims = (0,) + tuple(range(2, p.ndim))
-		inter += (p * t).sum(dims); pred_n += p.sum(dims); true_n += t.sum(dims)
+		inter += (p * t).sum(dims)
+		pred_n += p.sum(dims)
+		true_n += t.sum(dims)
 	return ((2 * inter + eps) / (pred_n + true_n + eps)).cpu().tolist()
 
 def main():
 	ap = argparse.ArgumentParser()
-	ap.add_argument("--model", choices=["can2d", "can3d"], default="can2d")
-	ap.add_argument("--epochs", type=int, default=50)
-	ap.add_argument("--lr", type=float, default=1e-3)
-	ap.add_argument("--scale", type=float, default=None, help="default 0.5 for 3D, 1.0 for 2D")
+	ap.add_argument("--model", choices=["can2d", "can3d"], default="can2d", help="Model variation to train")
+	ap.add_argument("--epochs", type=int, default=50, help="Number of epochs to train")
+	ap.add_argument("--lr", type=float, default=1e-3, help="Adam optimized learning rate")
+	ap.add_argument("--scale", type=float, default=None, help="Scaling factor applied to image before the model. default 0.5")
 	ap.add_argument("--batch", type=int, default=16, help="slices per batch (2D only)")
 	ap.add_argument("--overfit", type=int, default=0, help="train+val on N items")
 	ap.add_argument("--out", default="outputs")
@@ -54,21 +56,24 @@ def main():
 
 	dim = 3 if args.model == "can3d" else 2
 	if args.scale is None:
-		args.scale = 0.5 if dim == 3 else 1.0
+		args.scale = 0.5
 	device = ("cuda" if torch.cuda.is_available()
 			  else "mps" if torch.backends.mps.is_available() else "cpu")
 
 	if dim == 3:
 		splits = split_pairs(args.data_root, get_pairs(args.data_root))
 		Data, bs = HipMRI3D, 1
+		# Augment 3D training set ONLY
+		train_ds = Data(splits["train"], args.scale, augment=not args.overfit)
 	else:
 		splits = {s: get_slices(args.data_root, s) for s in ("train", "val", "test")}
 		Data, bs = HipMRI2D, args.batch
+		train_ds = Data(splits["train"], args.scale)       # HipMRI2D has no augment option yet
 	print(args.model, {k: len(v) for k, v in splits.items()})
 	if args.overfit:
 		splits["train"] = splits["val"] = splits["train"][:args.overfit]
 
-	train_dl = DataLoader(Data(splits["train"], args.scale), batch_size=bs, shuffle=True, num_workers=2)
+	train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=2)
 	val_dl = DataLoader(Data(splits["val"], args.scale), batch_size=bs)
 
 	model = CAN(in_ch=1, num_classes=NUM_CLASSES, dim=dim).to(device)
@@ -76,7 +81,9 @@ def main():
 
 	losses, val_dice, best = [], [], 0
 	for ep in range(args.epochs):
-		model.train(); run = 0; t0 = time.time()
+		model.train()
+		run = 0
+		t0 = time.time()
 		for x, y in train_dl:
 			x, y = x.to(device), y.to(device)
 			logits = model(x)
@@ -84,7 +91,7 @@ def main():
 			opt.zero_grad(); loss.backward(); opt.step()
 			run += loss.item()
 		d = evaluate(model, val_dl, device)
-		fg = sum(d[1:]) / (NUM_CLASSES - 1)                       # foreground mean (no background)
+		fg = sum(d[1:]) / (NUM_CLASSES - 1) # foreground mean (no background). 
 		losses.append(run / len(train_dl)); val_dice.append(fg)
 		print(f"ep {ep+1}: loss {losses[-1]:.4f} val fg-dice {fg:.3f} "
 			  f"per-class {[round(v, 2) for v in d]} ({time.time()-t0:.0f}s)")
@@ -93,9 +100,12 @@ def main():
 			torch.save(model.state_dict(), os.path.join(args.out, f"{args.model}_best.pt"))
 
 	fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-	ax[0].plot(losses); ax[0].set_title(f"{args.model} train loss")
-	ax[1].plot(val_dice); ax[1].set_title("Val mean foreground Dice")
-	fig.savefig(os.path.join(args.out, f"{args.model}_curves.png")); plt.close(fig)
+	ax[0].plot(losses)
+	ax[0].set_title(f"{args.model} train loss")
+	ax[1].plot(val_dice)
+	ax[1].set_title("Val mean foreground Dice")
+	fig.savefig(os.path.join(args.out, f"{args.model}_curves.png"))
+	plt.close(fig)
 
 if __name__ == "__main__":
 	main()

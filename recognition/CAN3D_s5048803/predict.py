@@ -52,7 +52,9 @@ def main():
 			pred = model(x[None].to(device)).argmax(1)[0].cpu()
 			for c in range(NUM_CLASSES):                  # pooled counts for Dice
 				p, t = pred == c, y == c
-				inter[c] += (p & t).sum(); pred_n[c] += p.sum(); true_n[c] += t.sum()
+				inter[c] += (p & t).sum()
+				pred_n[c] += p.sum()
+				true_n[c] += t.sum()
 			if len(examples) < args.n and (y == args.cls).any():
 				if dim == 3:                              # pick the slice with most of the class
 					s = (y == args.cls).sum((1, 2)).argmax()
@@ -75,7 +77,8 @@ def main():
 		ax[r, 3].imshow(img, cmap="gray")
 		ax[r, 3].imshow((pr != gt).float(), cmap="Reds", alpha=0.6)   # red = wrong voxels
 		for a, t in zip(ax[r], ["Image", "Ground truth", "Prediction", "Difference"]):
-			a.set_title(t); a.axis("off")
+			a.set_title(t)
+			a.axis("off")
 	fig.tight_layout()
 	path = os.path.join(args.out, f"{args.model}_predictions.png")
 	fig.savefig(path)

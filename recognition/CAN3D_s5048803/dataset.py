@@ -102,8 +102,8 @@ def split_pairs(root, pairs, seed=42, frac=(0.7, 0.15, 0.15)):
 
 class HipMRI3D(Dataset):
 	"""One volume per item: image (1, D, H, W) float, label (D, H, W) long."""
-	def __init__(self, pairs, scale):
-		self.pairs, self.scale = pairs, scale
+	def __init__(self, pairs, scale, augment=False):
+		self.pairs, self.scale, self.augment = pairs, scale, augment
 
 	def __len__(self):
 		return len(self.pairs)
@@ -121,5 +121,9 @@ class HipMRI3D(Dataset):
 		if self.scale != 1:
 			img = F.interpolate(img, scale_factor=self.scale, mode="trilinear", align_corners=False)
 			lbl = F.interpolate(lbl, scale_factor=self.scale, mode="nearest")  # keeps class IDs intact
-		return img[0], lbl[0, 0].long()
-
+		img, lbl = img[0], lbl[0, 0].long()          # img (1,D,H,W), lbl (D,H,W)
+		if self.augment:
+			if torch.rand(1) < 0.5:                   # flip left-right (last axis)
+				img, lbl = img.flip(-2), lbl.flip(-2)
+			img = img * (1 + 0.1 * torch.randn(1)) + 0.1 * torch.randn(1)   # intensity scale/shift
+		return img, lbl
