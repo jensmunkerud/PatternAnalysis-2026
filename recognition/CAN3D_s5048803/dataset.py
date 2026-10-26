@@ -25,7 +25,7 @@ def layout():
 	return LAYOUTS["rangpur" if RANGPUR_MODE else "local"]
 
 
-# ---------- 2D loading ----------
+# 2D loading
 def slice_key(path):
 	"""'case_004_week_0_slice_10.nii.gz' or 'seg_004_week_0_slice_10.nii.gz' -> ('004', '0', '10')."""
 	return re.search(r"(\d+)_week_(\d+)_slice_(\d+)", os.path.basename(path), re.I).groups()
@@ -41,32 +41,43 @@ def get_slices(root, split):
 	return pairs
 
 class HipMRI2D(Dataset):
-	"""One slice per item: image (1, H, W) float, label (H, W) long."""
+	"""One slice per item: image (1, H, W) float, label (H, W) long.
+	Every slice is decoded, padded and scaled once here, so epochs only index into memory."""
 	def __init__(self, pairs, scale):
-		self.pairs, self.scale = pairs, scale
+		imgs, lbls = [], []
+		for ip, lp in pairs:
+			img = nib.load(ip).get_fdata(caching="unchanged")
+			lbl = nib.load(lp).get_fdata(caching="unchanged")
+			if img.ndim == 3: img = img[..., 0]          # some files carry an extra axis
+			if lbl.ndim == 3: lbl = lbl[..., 0]
+			img = (img - img.mean()) / (img.std() + 1e-8)
+			img = torch.from_numpy(img.astype(np.float32))[None, None]
+			lbl = torch.from_numpy(np.rint(lbl).astype(np.float32))[None, None]
+
+			# slices come in different widths (e.g. 128 and 144): pad to a common size so batches can stack
+			pad_h = max(0, 256 - img.shape[-2])
+			pad_w = max(0, 144 - img.shape[-1])
+			img = F.pad(img, (0, pad_w, 0, pad_h))   # pads with 0 (the mean after z-scoring)
+			lbl = F.pad(lbl, (0, pad_w, 0, pad_h))   # pads with 0 = background
+
+			if scale != 1:
+				img = F.interpolate(img, scale_factor=scale, mode="bilinear", align_corners=False)
+				lbl = F.interpolate(lbl, scale_factor=scale, mode="nearest")
+			imgs.append(img[0])                          # (1, H, W)
+			lbls.append(lbl[0, 0].to(torch.uint8))       # (H, W), small in memory
+		self.imgs, self.lbls = torch.stack(imgs), torch.stack(lbls)
 
 	def __len__(self):
-		return len(self.pairs)
+		return len(self.imgs)
 
 	def __getitem__(self, i):
-		ip, lp = self.pairs[i]
-		img = nib.load(ip).get_fdata(caching="unchanged")
-		lbl = nib.load(lp).get_fdata(caching="unchanged")
-		if img.ndim == 3: img = img[..., 0]          # some files carry an extra axis
-		if lbl.ndim == 3: lbl = lbl[..., 0]
-		img = (img - img.mean()) / (img.std() + 1e-8)
-		img = torch.from_numpy(img.astype(np.float32))[None, None]
-		lbl = torch.from_numpy(np.rint(lbl).astype(np.float32))[None, None]
-		if self.scale != 1:
-			img = F.interpolate(img, scale_factor=self.scale, mode="bilinear", align_corners=False)
-			lbl = F.interpolate(lbl, scale_factor=self.scale, mode="nearest")
-		return img[0], lbl[0, 0].long()
+		return self.imgs[i], self.lbls[i].long()
 
-
-# ---------- 3D loading ----------
+# 3D loading
+# The key is what differentiates different patients
 def key(path):
-	"""'Case_004_Week0_LFOV.nii.gz' or 'B006_Week1_SEMANTIC.nii.gz' -> ('004', '0')."""
-	return re.search(r"(?:Case_|B)(\d+)_Week(\d+)", os.path.basename(path), re.I).groups()
+	"""'Case_004_Week0_LFOV.nii.gz' or 'M004_Week1_SEMANTIC.nii.gz' -> ('004', '0')."""
+	return re.search(r"(?:Case_|[A-Z])(\d+)_Week(\d+)", os.path.basename(path), re.I).groups()
 
 def patient_id(pair):
 	return key(pair[0])[0]

@@ -6,6 +6,11 @@
 * 3D Augmentation with PyTorch is used for the 3D dataset to increase variation and avoid overfitting
 * Uses one-hot encoding to avoid falsely ranking the order of different classes
 
+perhaps put each note under its relevant section:
+
+DATASET:
+* Pads necessary slices to every slice is 128x64 (some are 128x144)
+
 
 
 # Feasibility report
