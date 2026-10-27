@@ -9,10 +9,11 @@ import torch.nn as nn
 
 KERNEL_SIZE 		= 3
 LEAKY_RELU_SLOPE 	= 0.01
-NETWORK_WIDTH 		= 24
 
-# The fundamental element of the CAN network
 class DilatedBlock(nn.Module):
+	"""
+	The fundamental element of the CAN network, containing a convolution, normalization and relu activation layer.
+	"""
 	def __init__(self, in_ch, out_ch, dilation, dim=3):
 		super().__init__()
 		Conv = nn.Conv3d if dim == 3 else nn.Conv2d
@@ -24,15 +25,15 @@ class DilatedBlock(nn.Module):
 	def forward(self, x):
 		return self.act(self.norm(self.conv(x)))
 
-# The network: A daisychain of 5 DilatedBlocks with increasing dilations to improve receptive field.
-# An output convolutional layer turning the NETWORK_WIDTH feature maps into 6 classes.
-# Works for both 2d and 3d
 class CAN(nn.Module):
 	"""
+	The network: A daisychain of 5 DilatedBlocks with increasing dilations to improve receptive field.
+	An output convolutional layer turning the NETWORK_WIDTH feature maps into 6 classes.
+	Works for both 2d and 3d
 	dim=2 gives the baseline, dim=3 gives CAN3D.
 	dilation = (Depth, Height, Width)
 	"""
-	def __init__(self, in_ch=1, num_classes=6, width=NETWORK_WIDTH,
+	def __init__(self, in_ch=1, num_classes=6, width=24,
 				 dilations=((1,1,1), (2,2,2), (2,4,4), (2,8,8), (1,1,1)), dim=3):
 		super().__init__()
 		layers, ch = [], in_ch

@@ -52,6 +52,7 @@ def main():
 	ap.add_argument("--out", default="outputs", help="Ensure the output folder exists beforehand!")
 	ap.add_argument("--data_root", default="/home/groups/comp3710/HipMRI_Study_open" if RANGPUR_MODE else ".")
 	ap.add_argument("--workers", type=int, default=4, help="DataLoader worker processes")
+	ap.add_argument("--width", type=int, default=24, help="Width of the network (default 24)")
 	args = ap.parse_args()
 	os.makedirs(args.out, exist_ok=True)
 
@@ -83,7 +84,7 @@ def main():
 	train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, **kw)
 	val_dl = DataLoader(val_ds, batch_size=bs, **kw)
 
-	model = CAN(in_ch=1, num_classes=NUM_CLASSES, dim=dim).to(device)
+	model = CAN(in_ch=1, num_classes=NUM_CLASSES, width=args.width, dim=dim).to(device)
 	opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
 	losses, val_dice, best = [], [], 0

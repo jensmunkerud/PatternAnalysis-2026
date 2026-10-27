@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 NUM_CLASSES = 6
+CLASS_NAMES = ["background", "body", "skeleton", "bladder", "rectum", "prostate"]
 RANGPUR_MODE = os.environ.get("RANGPUR_MODE", "0") == "1"
 
 # Folder names inside --data_root for each machine
@@ -25,7 +26,6 @@ def layout():
 	return LAYOUTS["rangpur" if RANGPUR_MODE else "local"]
 
 
-# 2D loading
 def slice_key(path):
 	"""'case_004_week_0_slice_10.nii.gz' or 'seg_004_week_0_slice_10.nii.gz' -> ('004', '0', '10')."""
 	return re.search(r"(\d+)_week_(\d+)_slice_(\d+)", os.path.basename(path), re.I).groups()
@@ -50,7 +50,7 @@ class HipMRI2D(Dataset):
 			lbl = nib.load(lp).get_fdata(caching="unchanged")
 			if img.ndim == 3: img = img[..., 0]          # some files carry an extra axis
 			if lbl.ndim == 3: lbl = lbl[..., 0]
-			img = (img - img.mean()) / (img.std() + 1e-8)
+			img = (img - img.mean()) / (img.std() + 1e-8) # Normalization
 			img = torch.from_numpy(img.astype(np.float32))[None, None]
 			lbl = torch.from_numpy(np.rint(lbl).astype(np.float32))[None, None]
 
@@ -125,7 +125,7 @@ class HipMRI3D(Dataset):
 		lbl = nib.load(lp).get_fdata(caching="unchanged")
 		if img.ndim == 4: img = img[..., 0]
 		if lbl.ndim == 4: lbl = lbl[..., 0]
-		img = (img - img.mean()) / (img.std() + 1e-8)          # z-score per volume
+		img = (img - img.mean()) / (img.std() + 1e-8) # Normalization
 		# files are (H, W, D); model wants (D, H, W); add batch+channel axes for interpolate
 		img = torch.from_numpy(img.astype(np.float32)).permute(2, 0, 1)[None, None]
 		lbl = torch.from_numpy(np.rint(lbl).astype(np.float32)).permute(2, 0, 1)[None, None]
