@@ -11,6 +11,7 @@ from torch.utils.data import Dataset
 
 NUM_CLASSES = 6
 CLASS_NAMES = ["background", "body", "skeleton", "bladder", "rectum", "prostate"]
+FG_NAMES = CLASS_NAMES[1:]
 RANGPUR_MODE = os.environ.get("RANGPUR_MODE", "0") == "1"
 
 # Folder names inside --data_root for each machine
@@ -38,6 +39,8 @@ def get_slices(root, split):
 	segs = {slice_key(p): p for p in glob.glob(os.path.join(d2, f"keras_slices_seg_{name}", "*.nii.gz"))}
 	pairs = [(i, segs[slice_key(i)]) for i in imgs if slice_key(i) in segs]
 	assert pairs, f"No 2D slices found for split '{split}' under {d2}"
+	print(split, end="")
+	print(set([slice_key(i)[0] for i in imgs]))
 	return pairs
 
 class HipMRI2D(Dataset):
@@ -99,6 +102,7 @@ def split_pairs(root, pairs, seed=42, frac=(0.7, 0.15, 0.15)):
 	for split, name in SLICE_DIRS.items():
 		files = glob.glob(os.path.join(d2, f"keras_slices_{name}", "*.nii.gz"))
 		ids[split] = {re.search(r"(\d+)", os.path.basename(f)).group(1) for f in files}
+	print(ids) # Print to verify 3D split
 
 	if not all(ids.values()):          # 2D folders missing -> random patient split
 		print("WARNING: 2D split not found, using random patient split")

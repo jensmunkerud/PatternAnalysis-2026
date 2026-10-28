@@ -11,12 +11,13 @@ Usage:
 
 import argparse, os
 import numpy as np
+import time
 import torch
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from modules import CAN
 from dataset import (get_pairs, split_pairs, HipMRI3D, get_slices, HipMRI2D,
-					 NUM_CLASSES, CLASS_NAMES, RANGPUR_MODE)
+					 NUM_CLASSES, CLASS_NAMES, FG_NAMES, RANGPUR_MODE)
 
 def get_device():
 	return ("cuda" if torch.cuda.is_available()
@@ -47,10 +48,11 @@ def metrics(conf):
 	fp = conf.sum(0).float() - tp
 	fn = conf.sum(1).float() - tp
 	gt = (tp + fn).clamp(min=1)
-	return dict(dice=2 * tp / (2 * tp + fp + fn).clamp(min=1),
-				iou=tp / (tp + fp + fn).clamp(min=1),
-				over=100 * fp / gt,
-				under=100 * fn / gt)
+	result= dict(dice=2 * tp / (2 * tp + fp + fn).clamp(min=1),
+			 iou=tp / (tp + fp + fn).clamp(min=1),
+			 over=100 * fp / gt,
+			 under=100 * fn / gt)
+	return {k: v[1:] for k, v in result.items()}
 
 @torch.no_grad()
 def evaluate(model, ds, dim, device):
@@ -62,9 +64,9 @@ def evaluate(model, ds, dim, device):
 
 def print_table(name, m):
 	print(f"{name}, test set:")
-	for c in range(NUM_CLASSES):
-		print(f"  {CLASS_NAMES[c]:>8}: Dice {m['dice'][c]:.3f}  IoU {m['iou'][c]:.3f}  "
-			  f"over {m['over'][c]:.1f}%  under {m['under'][c]:.1f}%")
+	for i, cname in enumerate(FG_NAMES):
+		print(f"  {cname:>8}: Dice {m['dice'][i]:.3f}  IoU {m['iou'][i]:.3f}  "
+			  f"over {m['over'][i]:.1f}%  under {m['under'][i]:.1f}%")
 	print(f"  mean foreground: Dice {m['dice'][1:].mean():.3f}  IoU {m['iou'][1:].mean():.3f}")
 
 
@@ -82,13 +84,13 @@ def run_cases(model, ds, dim, label, cls, n, device):
 		x, y = ds[i]
 		pred = model(x[None].to(device)).argmax(1)[0].cpu()
 		m = metrics(confusion(pred, y))
-		if dim == 3:                                   # show the slice with most of the class
+		if dim == 3: # show the slice with most of the class
 			s = (y == cls).sum((1, 2)).argmax()
 			img, gt, pr = x[0, s], y[s], pred[s]
 		else:
 			img, gt, pr = x[0], y, pred
-		cases.append(dict(label=label, index=i, img=img, gt=gt, pred=pr, iou=m["iou"][cls].item(),
-						  over=m["over"][cls].item(), under=m["under"][cls].item()))
+		cases.append(dict(label=label, index=i, img=img, gt=gt, pred=pr, iou=m["iou"][cls-1].item(),
+						  over=m["over"][cls-1].item(), under=m["under"][cls-1].item()))
 	return cases
 
 def plot_cases(cases, path):
@@ -112,20 +114,41 @@ def plot_cases(cases, path):
 
 def plot_dice_comparison(m2d, m3d, path):
 	"""Grouped bar plot: per-class Dice of CAN2D next to CAN3D."""
-	x = np.arange(NUM_CLASSES)
+	x = np.arange(len(FG_NAMES))
 	fig, ax = plt.subplots(figsize=(8, 4))
 	ax.bar(x - 0.2, m2d["dice"].numpy(), 0.4, label="CAN2D")
 	ax.bar(x + 0.2, m3d["dice"].numpy(), 0.4, label="CAN3D")
 	ax.set_xticks(x)
-	ax.set_xticklabels(CLASS_NAMES)
+	ax.set_xticklabels(FG_NAMES)
 	ax.set_ylabel("Dice")
-	ax.set_ylim(0, 1)
+	ax.set_ylim(0.5, 1)
 	ax.set_title("Per-class Dice on the test set")
 	ax.legend()
 	fig.tight_layout()
 	fig.savefig(path)
 	plt.close(fig)
 
+@torch.no_grad()
+def time_inference(model, x, device, warmup=3, runs=10):
+	"""Mean and std seconds for one forward pass of input x (already shaped [B, C, ...])."""
+	x = x.to(device)
+	sync = torch.cuda.synchronize if device == "cuda" else (torch.mps.synchronize if device == "mps" else (lambda: None))
+	for _ in range(warmup):          # warm-up: kernel compilation, cudnn autotune, allocator
+		model(x)
+	sync()
+	times = []
+	for _ in range(runs):
+		sync()                       # make sure earlier work is finished
+		t0 = time.perf_counter()
+		model(x)
+		sync()                       # wait for the GPU to actually finish
+		times.append(time.perf_counter() - t0)
+	t = torch.tensor(times)
+	return t.mean().item(), t.std().item()
+
+def num_parameters(model, dim):
+	total_params = sum(p.numel() for p in model.parameters())
+	print(f"Total parameters {dim}D: {total_params:,}")
 
 def main():
 	ap = argparse.ArgumentParser()
@@ -133,7 +156,7 @@ def main():
 	ap.add_argument("--weights3d", default="./outputs/can3d_best.pt", help="path to the CAN3D .pt file")
 	ap.add_argument("--scale2d", type=float, default=0.5, help="must match CAN2D training")
 	ap.add_argument("--scale3d", type=float, default=0.5, help="must match CAN3D training")
-	ap.add_argument("--cls", type=int, default=5, help="class shown in the example cases (assumed prostate)")
+	ap.add_argument("--cls", type=int, default=5, help="Class to plot metrics of (5=prostate)")
 	ap.add_argument("--n", type=int, default=2, help="example cases per model")
 	ap.add_argument("--out", default="outputs")
 	ap.add_argument("--data_root", default="/home/groups/comp3710/HipMRI_Study_open" if RANGPUR_MODE else ".")
@@ -141,7 +164,7 @@ def main():
 	os.makedirs(args.out, exist_ok=True)
 	device = get_device()
 
-	# evaluate both models on their own test sets
+	# Evaluate both models' Dice, IoU, over -and under contouring for every class (except background)
 	runs = {}
 	for dim, weights, scale in ((3, args.weights3d, args.scale3d), (2, args.weights2d, args.scale2d)):
 		model = load_model(weights, dim, device)
@@ -150,7 +173,7 @@ def main():
 		runs[dim] = dict(label=f"CAN{dim}D", model=model, ds=ds, metrics=m)
 		print_table(f"CAN{dim}D", m)
 
-	# example cases: CAN3D on the top rows, CAN2D below
+	# Visualization of 2D vs 3D segmentation
 	cases = []
 	for dim in (3, 2):
 		r = runs[dim]
@@ -163,6 +186,13 @@ def main():
 	# per-class Dice, 2D vs 3D
 	plot_dice_comparison(runs[2]["metrics"], runs[3]["metrics"], os.path.join(args.out, "dice_comparison.png"))
 	print("saved cases.png and dice_comparison.png to", args.out)
+
+	x3d = runs[3]["ds"][0][0][None]    # (1, 1, D, H, W): one test volume
+	x2d = x3d[0].permute(1, 0, 2, 3)   # (D, 1, H, W): the same volume as D slices in one batch
+
+	for name, model, x in (("CAN3D", runs[3]["model"], x3d), ("CAN2D", runs[2]["model"], x2d)):
+		mean, std = time_inference(model, x, device)
+		print(f"{name}: {mean*1000:.1f} +/- {std*1000:.1f} ms per volume")
 
 if __name__ == "__main__":
 	main()
