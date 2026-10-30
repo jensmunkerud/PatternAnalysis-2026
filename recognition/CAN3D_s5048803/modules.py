@@ -37,9 +37,9 @@ class CAN(nn.Module):
 				 dilations=((1,1,1), (2,2,2), (2,4,4), (2,8,8), (1,1,1)), dim=3):
 		super().__init__()
 		layers, ch = [], in_ch
-		for d in dilations:
-			d = d if dim == 3 else d[1]
-			layers.append(DilatedBlock(ch, width, d, dim))
+		for dilation in dilations:
+			dilation = dilation if dim == 3 else dilation[1]
+			layers.append(DilatedBlock(ch, width, dilation, dim))
 			ch = width
 		self.body = nn.Sequential(*layers)
 		Conv = nn.Conv3d if dim == 3 else nn.Conv2d

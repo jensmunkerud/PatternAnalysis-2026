@@ -2,9 +2,24 @@
 
 Author: s5048803
 
+## Folder structure
+1. modules.py: Containing the source code of the components of your model. Each component must be
+implemented as a class or a function in PyTorch or TensorFlow/Keras. Your implementation of the
+model should not depend on NumPy (or other Python libraries not part of PyTorch / TensorFlow)
+in any way unless otherwise approved by the teaching staff.
+2. dataset.py: Containing the data loader for loading and preprocessing your data, including leakagefree train/validation/test splitting functions and data augmentations.
+3. train.py: Containing the source code for training, validating, testing, and saving your model.
+The model should be imported from modules.py and the data loader should be imported from
+dataset.py. Make sure to plot the losses and metrics during training.
+4. predict.py: Showing example usage of your trained model. It should load your saved model
+weights, run inference on test cases, print out any results, and provide visualisations where applicable
+(e.g., prediction overlays, generated samples, heatmaps). NumPy is allowed in this script for
+visualization or loading data.
+5. README.md: Sufficiently documenting your project, working principles, feasibility review, experiments,
+and instructions (see Section 5.3).
+
 ## Algorithm description
 
-The CAN3D is very cool
 A title, a description of the algorithm and the problem that it solves (approximately a paragraph),
 how it works in a paragraph, and a figure/visualisation.
 
@@ -26,13 +41,15 @@ The model can be used to give a rough estimate of the segmentation of different 
 `tqdm >= 4.70.1` 
 A requirements.txt is included
 
+## Reproducibility
+
 ## Preparing the dataset
 
 Description of any specific pre-processing used, with references if any. Justify your training,
 validation, and testing splits of the data.
 The 3D dataset contains 38 patients with 3D MRI scans from several consecutive weeks, totaling 211 samples. The 2D dataset has extracted 2D slices of this same dataset and is already split into 11460 for training 660 for validation and 540 for test, totaling 12660 samples. The 2D dataset does not contain a single patient in multiple splits. `dataset.py` therefore compares the patient ID of the 2D and 3D datasets and splits the 3D dataset in the same way, dropping the sample if it does not find a perfect match.
 
-Below is the patient ids of the pre-split 2D dataset.
+Below is the patient ids of the pre-split 2D dataset, taken from the `dataset.py`.
 `train{'008', '019', '016', '020', '010', '011', '007', '012', '025', '032', '024', '027', '018', '026', '021', '013', '033', '006', '035', '030', '029', '015', '017', '022', '005', '023', '031', '004', '028', '009', '014'}
 val{'038', '039', '037', '036'}
 test{'040', '042', '041'}`
@@ -42,23 +59,29 @@ The following is the split made by the 3D dataset, proving there is no leakage a
 
 ## Results
 
-Example inputs, outputs, and visual plots of your algorithm.
+### Overcoverage / Undercoverage
 
-Updated runs
+### Small prostate
+Investigate the over-contouring near the base of the prostate, the 2d performed way worse than 3d here no? like 900% overcontouring
+
+### Stray floating artifacts
 
 
 ### 2d vs 3d results etc etc
 
 Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are made on a 16GB M2 Mac.
 
+![2d training](./results/can2d_training.png)
+![3d training](./results/can3d_training.png)
+
 ### Resource profiling
 
 Resource profiling table documenting computational efficiency (peak GPU VRAM, parameter
 count, and inference runtime/latency).
-| TYPE  | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] |
-| ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- |
-| CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 935.5 +/- 5.6       |
-| CAN3D | 63 126     | 24    | 20     |               |                    | 94.5 +/- 0.3        |
+| TYPE  | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
+| ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
+| CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 935.5 +/- 5.6       | 1131                  |
+| CAN3D | 63 126     | 24    | 20     | 00:10:19      | 3384672K = 3.3GB   | 94.5 +/- 0.3        | 1155                  |
 
 Note: Inference was run on a single 3D volume for CAN3D, while an equivalent amount of slices for the CAN2D,
 a total of 10 times.
