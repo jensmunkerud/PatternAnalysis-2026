@@ -133,7 +133,7 @@ def plot_item(model, dataset, patient, device, dim, cls, index=32, batch=True):
 		a.axis("off")
 
 	fig.tight_layout()
-	fig.savefig(f"./{("results/" + str(dim) + "d_slices/") if batch else ""}can{dim}d_slice_{index}", dpi=200)
+	fig.savefig(f"./{("results/" + str(dim) + "d_slices/") if batch else "./results/"}can{dim}d_slice_{index}", dpi=200)
 	plt.close(fig)
 
 

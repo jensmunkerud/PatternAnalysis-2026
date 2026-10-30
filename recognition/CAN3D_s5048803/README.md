@@ -63,7 +63,8 @@ python train.py --epochs 20 --scale 0.5 --model can3d
 
 ## Preparing the dataset
 
-The 3D dataset contains 38 patients with 3D MRI scans from several consecutive weeks, totaling 211 samples. The 2D dataset has extracted 2D slices of this same dataset and is already split into 11460 for training 660 for validation and 540 for test, totaling 12660 samples. The 2D dataset does not contain a single patient in multiple splits. `dataset.py` therefore compares the patient ID of the 2D and 3D datasets and splits the 3D dataset in the same way, dropping the sample if it does not find a perfect match.
+The 3D dataset contains 38 patients with 3D MRI scans from several consecutive weeks, totaling 211 samples. The 2D dataset has extracted 2D slices of this same dataset and is already split into 11460 for training 660 for validation and 540 for test, totaling 12660 samples. The 2D dataset does not contain a single patient in multiple splits. `dataset.py` therefore compares the patient ID of the 2D and 3D datasets and splits the 3D dataset in the same way, dropping the sample if it does not find a perfect match. Padding is also added to the 2D dataset to ensure common resolution of 128x64 (some slices are 128x144).
+
 
 Below is the patient ids of the pre-split 2D dataset, taken from the `dataset.py`.
 `train{'008', '019', '016', '020', '010', '011', '007', '012', '025', '032', '024', '027', '018', '026', '021', '013', '033', '006', '035', '030', '029', '015', '017', '022', '005', '023', '031', '004', '028', '009', '014'} val{'038', '039', '037', '036'} test{'040', '042', '041'}`
@@ -77,9 +78,9 @@ Note: The per-class dice is volatile after ~5 epochs, but the loss keeps decreas
 
 ## Results
 
-### Over-contouring / Under-contouring
+The 3D dataset is shown here segmenting in the transversal (top-down) plane while the 2D dataset is locked in the coronal (front-back) plane. In later direct comparisons they will both be ran in the coronal plane.
+![Per-slice data](./results/cases.png)
 
-predict.py's `compare_slice_metrics` calculates four metrics per slice through the whole MRI volume, for both the 2D and 3D network. This gives a great insight into each models performance in different parts of the prostate. Strict patient and layer matching is enforced to ensure comparable data. We see that the Dice score performs great for both models, though slightly better in the 3D in some cases. Most notably, the 2D networks' over-contouring sometimes appear nowhere close to the prostate, perhaps due to it being less spacially aware between the slices then the 3D model. It seems however that no model is dramatically better than the other one. More results are in [results](./results).
 
 #### Slice metrics for volume 0 in test set
 
@@ -89,13 +90,33 @@ predict.py's `compare_slice_metrics` calculates four metrics per slice through t
 
 ![Per-slice data](./results/can_depth_comparison_vol2.png)
 
+Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are made on a 16GB M2 Mac.
+
+![2d training](./results/can2d_training.png)
+![3d training](./results/can3d_training.png)
+
+### Resource profiling
+
+| TYPE  | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
+| ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
+| CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 94.5 +/- 0.3        | 1131                  |
+| CAN3D | 63 126     | 24    | 20     | 00:10:19      | 3384672K = 3.3GB   | 935.5 +/- 5.6       | 1155                  |
+
+Note: Inference was run on a single 3D volume for CAN3D, while an equivalent amount of slices for the CAN2D,
+a total of 10 times.
+
+### Failure cases
+
+### Over-contouring / Under-contouring
+
+The `compare_slice_metrics()` in `predict.py` calculates four metrics per slice through the whole MRI volume, for both the 2D and 3D network. This gives a great insight into each models performance in different parts of the prostate. Strict patient and layer matching is enforced to ensure comparable data. We see that the Dice score performs great for both models, though slightly better in the 3D in some cases. Most notably, the 2D networks' over-contouring sometimes appear nowhere close to the prostate, perhaps due to it being less spacially aware between the slices then the 3D model. It seems however that no model is dramatically better than the other one. More results are in [results](./results).
+
 ### Small prostate
 
-Investigate the over-contouring near the base of the prostate, the 2d performed way worse than 3d here no? like 900% overcontouring
 At the base / apex of the prostate, the segmentation is very small. The 2D model performs very badly when at these parts of the prostate, as shown below
 
-![2d small artifact](./results/can2d_slice.png)
-![3d small artifact](./results/can2d_slice.png)
+![2d small artifact](./results/can2d_overcontouringg.png)
+![3d small artifact](./results/can2d_overcontouringg.png)
 
 ### Stray floating artifacts
 
@@ -105,34 +126,13 @@ For a given layer the CAN2D baseline model seems to be experiencing a lot more a
 ![3D model segmentation / metrics through slices](./results/3d_slices.gif)
 ![2D model segmentation / metrics through slices](./results/2d_slices.gif)
 
-Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are made on a 16GB M2 Mac.
-
-![2d training](./results/can2d_training.png)
-![3d training](./results/can3d_training.png)
-
-### Resource profiling
-
-Resource profiling table documenting computational efficiency (peak GPU VRAM, parameter
-count, and inference runtime/latency).
-
-| TYPE  | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
-| ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
-| CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 935.5 +/- 5.6       | 1131                  |
-| CAN3D | 63 126     | 24    | 20     | 00:10:19      | 3384672K = 3.3GB   | 94.5 +/- 0.3        | 1155                  |
-
-Note: Inference was run on a single 3D volume for CAN3D, while an equivalent amount of slices for the CAN2D,
-a total of 10 times.
-
-### Failure cases
-
- In-depth qualitative error autopsies analyzing 3–5 representative failure cases from the dataset
-(diagnosing root triggers and failure modes).
 
 ### Recommendations
 
 Actionable engineering recommendation and trade-off synthesis for your project manager.
 The results have shown that the 2D model vs 3D 
-
+There is a lot of headroom to use more memory for both of the models, both for training and inference. They both suffer from stray artifacts which I think this should solve.
+Seeing as the memory cost and inference runtime is still manageable, I see no reason not to continue developing the CAN3D model further.
 ## Notes
 
 * The loss function uses Cross-Entropy for optimal discrete segmentation performance
@@ -142,11 +142,7 @@ The results have shown that the 2D model vs 3D
 * Adam optimizer
 * The model does not prefer a class over any other, exploiting the added context to better the performance
 
-perhaps put each note under its relevant section:
 
-DATASET:
-
-* Pads necessary slices to every slice is 128x64 (some are 128x144)
 
 ## Feasibility report
 
