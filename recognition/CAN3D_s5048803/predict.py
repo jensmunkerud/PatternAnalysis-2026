@@ -218,13 +218,12 @@ def slice_metrics(pred, y):
 		for name, values in results.items()
 	}
 
-def plot_slice_metrics(results2d, results3d, cls, x):
+def plot_slice_metrics(results2d, results3d, has_prostate, cls, x):
 	metrics_to_plot = ["dice", "iou", "over", "under"]
 	titles = ["Dice", "IoU", "Over-contouring", "Under-contouring"]
 
 	fig, ax = plt.subplots(2, 2, figsize=(12, 8))
 	ax = ax.flatten()
-
 	for a, metric, title in zip(ax, metrics_to_plot, titles):
 		values2d = results2d[metric][:, cls - 1].numpy()
 		values3d = results3d[metric][:, cls - 1].numpy()
@@ -233,6 +232,13 @@ def plot_slice_metrics(results2d, results3d, cls, x):
 
 		a.plot(x, values2d, color='blue', label="CAN2D")
 		a.plot(x, values3d, color='green', label="CAN3D")
+
+		# Plot the prostate ground truth area
+		prostate_segment = np.flatnonzero(has_prostate)
+		lo = x[prostate_segment[0]]
+		hi = x[prostate_segment[-1]]
+		a.axvspan(lo, hi, color="orange", alpha=0.2, label="Prostate GT")
+
 		a.set_title(f"Per-layer {title}")
 		a.set_xlabel("Slice")
 		a.set_ylabel("%" if metric in ("over", "under") else metric)
@@ -294,7 +300,10 @@ def compare_slice_metrics(runs, root, vol, cls, device, scale2d):
 	idx = score.argmax(1)
 
 
-	y3, pred3 = planes(y3)[idx], planes(pred3)[idx]
+	y3 = planes(y3)[idx]
+	pred3 = planes(pred3)[idx]
+
+	has_prostate = (y2 == cls).flatten(1).any(1).numpy() 
 
 	results2d = slice_metrics(pred2, y2)
 	results3d = slice_metrics(pred3, y3)
@@ -302,6 +311,7 @@ def compare_slice_metrics(runs, root, vol, cls, device, scale2d):
 	plot_slice_metrics(
 		results2d,
 		results3d,
+		has_prostate,
 		cls,
 		nums
 	)
