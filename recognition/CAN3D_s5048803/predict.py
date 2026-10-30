@@ -25,11 +25,13 @@ def get_device():
 	return ("cuda" if torch.cuda.is_available()
 			else "mps" if torch.backends.mps.is_available() else "cpu")
 
+
 def load_model(weights, dim, device):
 	"""Rebuild the architecture, then load the trained weights into it."""
 	model = CAN(in_ch=1, num_classes=NUM_CLASSES, dim=dim).to(device)
 	model.load_state_dict(torch.load(weights, map_location=device))
 	return model.eval()
+
 
 def load_test_set(dim, root, scale):
 	if dim == 3:
@@ -37,10 +39,16 @@ def load_test_set(dim, root, scale):
 	return HipMRI2D(get_slices(root, "test"), scale)
 
 
+def planes(t):
+	"""Stack of 2D planes cut along axis 2, same layout as 2D slice"""
+	return t.movedim(2, 0).transpose(1, 2)
+
+
 def confusion(pred, target):
 	"""NUM_CLASSES x NUM_CLASSES counts. Rows = ground truth class, columns = predicted class."""
 	idx = target.flatten() * NUM_CLASSES + pred.flatten()
 	return torch.bincount(idx, minlength=NUM_CLASSES ** 2).reshape(NUM_CLASSES, NUM_CLASSES)
+
 
 def metrics_from_conf(conf):
 	"""Calculate per-class segmentation metrics from confusion matrix"""
@@ -54,9 +62,11 @@ def metrics_from_conf(conf):
 				  under=100 * fn / gt)
 	return {k: v[1:] for k, v in result.items()}
 
+
 def metrics(pred, target):
 	"""Get metrics from prediction and target"""
 	return metrics_from_conf(confusion(pred, target))
+
 
 @torch.no_grad()
 def evaluate(model, dataset, dim, device):
@@ -67,6 +77,7 @@ def evaluate(model, dataset, dim, device):
 		pred = model(x.to(device)).argmax(1)
 		conf += confusion(pred, y.to(device))
 	return conf.cpu()
+
 
 def print_table(name, m):
 	print(f"{name}, test set:")
@@ -82,39 +93,59 @@ def pick_cases(ds, cls, n):
 	assert have, f"No test item contains class {cls}"
 	return have[::max(1, len(have) // n)][:n]
 
+
+# Plot a single slice's segmentation, metrics and difference plot (to be animated as gifs)
 @torch.no_grad()
-def plot_item(model, ds, index, device, path):
-	x, y = ds[index]
+def plot_item(model, dataset, patient, device, dim, cls, index=32, batch=True):
+	x, y = dataset[patient]
 
 	pred = model(x[None].to(device)).argmax(1)[0].cpu()
 
-	fig, ax = plt.subplots(1, 3, figsize=(12, 4))
+	if dim == 3:
+		img, gt, pred = planes(x[0]), planes(y), planes(pred)
+		img, gt, pred = img[index], gt[index], pred[index]
+		name = f"CAN3D patient {patient}, slice {index}"
+	else:
+		img, gt, pred = x[0], y, pred
+		name = f"CAN2D slice {patient}"
 
-	ax[0].imshow(x[0], cmap="gray")
-	ax[0].set_title(f"CAN2D item {index} - MRI")
+	metric_results = metrics(pred, gt)
+	stats = (f"Dice {metric_results['dice'][cls-1]:.3f} | IoU {metric_results['iou'][cls-1]:.3f}\n"
+			f"over {metric_results['over'][cls-1]:.1f}% | under {metric_results['under'][cls-1]:.1f}%")
 
-	ax[1].imshow(y, cmap="Reds")
+
+	fig, ax = plt.subplots(1, 4, figsize=(12, 4))
+
+	ax[0].imshow(img, cmap="gray")
+	ax[0].set_title(f"{name} - MRI")
+
+	ax[1].imshow(gt, cmap="tab10", vmin=0, vmax=9)
 	ax[1].set_title("Ground truth")
 
-	ax[2].imshow(pred, cmap="Reds")
-	ax[2].set_title("Prediction")
+	ax[2].imshow(pred, cmap="tab10", vmin=0, vmax=9)
+	ax[2].set_title(f"Prediction ({FG_NAMES[cls-1]})\n{stats}")
+
+	ax[3].imshow(img, cmap="gray")
+	ax[3].imshow((pred != gt).float(), cmap="Reds", alpha=0.5)
+	ax[3].set_title("Difference (red = wrong)")
 
 	for a in ax:
 		a.axis("off")
 
 	fig.tight_layout()
-	fig.savefig(path, dpi=200)
+	fig.savefig(f"./{("results/" + str(dim) + "d_slices/") if batch else ""}can{dim}d_slice_{index}", dpi=200)
 	plt.close(fig)
 
 
 @torch.no_grad()
-def run_cases(model, ds, dim, label, cls, n, device):
+def run_cases(model, dataset, dim, label, cls, n, device):
 	"""Predict n example items. Case stats cover the whole item: the full volume for 3D, the slice for 2D."""
 	cases = []
-	for i in pick_cases(ds, cls, n):
-		x, y = ds[i]
+	for i in pick_cases(dataset, cls, n):
+		x, y = dataset[i]
 		pred = model(x[None].to(device)).argmax(1)[0].cpu()
 		m = metrics(confusion(pred, y))
+		
 		if dim == 3: # show the slice with most of the class
 			s = (y == cls).sum((1, 2)).argmax()
 			img, gt, pr = x[0, s], y[s], pred[s]
@@ -135,6 +166,7 @@ def plot_cases(cases, path):
 		ax[r, 3].imshow((c["pred"] != c["gt"]).float(), cmap="Reds", alpha=0.6)
 		titles = [f'{c["label"]} image', "Ground truth", "Prediction",
 				  f'IoU {c["iou"]:.2f} | over {c["over"]:.0f}% | under {c["under"]:.0f}%']
+
 		for a, t in zip(ax[r], titles):
 			a.set_title(t, fontsize=9)
 			a.axis("off")
@@ -218,7 +250,7 @@ def slice_metrics(pred, y):
 		for name, values in results.items()
 	}
 
-def plot_slice_metrics(results2d, results3d, has_prostate, cls, x):
+def plot_slice_metrics(results2d, results3d, has_prostate, cls, x, vol):
 	metrics_to_plot = ["dice", "iou", "over", "under"]
 	titles = ["Dice", "IoU", "Over-contouring", "Under-contouring"]
 
@@ -227,6 +259,7 @@ def plot_slice_metrics(results2d, results3d, has_prostate, cls, x):
 	for a, metric, title in zip(ax, metrics_to_plot, titles):
 		values2d = results2d[metric][:, cls - 1].numpy()
 		values3d = results3d[metric][:, cls - 1].numpy()
+		
 		if (metric == "dice"):
 			a.axhline(y=0.7, color='r')
 
@@ -252,13 +285,14 @@ def plot_slice_metrics(results2d, results3d, has_prostate, cls, x):
 		a.xaxis.set_major_locator(MaxNLocator(integer=True))
 
 	fig.tight_layout()
-	fig.savefig("./results/can_depth_comparison.png", dpi=200)
+	fig.savefig(f"./results/can_depth_comparison_vol{vol}.png", dpi=200)
 	plt.close(fig)
 
-# Add a a mask showing where the ground truth class is in the x axis
+
+
 @torch.no_grad()
 def compare_slice_metrics(runs, root, vol, cls, device, scale2d):
-	ds3 = runs[3]["ds"]
+	ds3 = runs[3]["dataset"]
 
 	matched = []
 
@@ -270,7 +304,6 @@ def compare_slice_metrics(runs, root, vol, cls, device, scale2d):
 			matched.append((i, slices))
 
 	i3, slices = matched[vol]
-
 	x3, y3 = ds3[i3]
 
 	pred3 = runs[3]["model"](
@@ -291,14 +324,9 @@ def compare_slice_metrics(runs, root, vol, cls, device, scale2d):
 	
 	nums = torch.tensor([int(slice_key(p[0])[2]) for p in slices])
 
-	# 2d dataset is cut along axis 2 of the 3d dataset
-	def planes(t):
-		return t.movedim(2, 0).transpose(1, 2)      # (n_planes, 128, 64), same as a 2D slice
-
 	v = planes(y3)
 	score = (y2[:, None] == v[None]).float().mean((2, 3))   # (n2d, n_planes)
 	idx = score.argmax(1)
-
 
 	y3 = planes(y3)[idx]
 	pred3 = planes(pred3)[idx]
@@ -313,17 +341,18 @@ def compare_slice_metrics(runs, root, vol, cls, device, scale2d):
 		results3d,
 		has_prostate,
 		cls,
-		nums
+		nums,
+		vol
 	)
 
 
 def matching_slices(root, pair3d):
 	"""The keras test slices from the same patient and week as one 3D volume, ordered by slice number."""
 	pid, week = key(pair3d[0])
-	sl = [p for p in get_slices(root, "test")
+	slices = [p for p in get_slices(root, "test")
 		  if slice_key(p[0])[0] == pid and slice_key(p[0])[1] == week]
-	return sorted(sl, key=lambda p: int(slice_key(p[0])[2]))
-
+	print(f"3D volume {pair3d[0]} -> pid {pid}, week {week}, {len(slices)} 2D slices")
+	return sorted(slices, key=lambda p: int(slice_key(p[0])[2]))
 
 
 def main():
@@ -348,20 +377,28 @@ def main():
 		dataset = load_test_set(dim, args.data_root, scale)
 
 		if dim == 2:
-			plot_item(model,dataset,200,device,"results/can2d_item7.png")
+			plot_item(model,dataset,7,device, dim, args.cls, 20, False) # Patient 7 of 2d test set is a great example of over-contouring
 
-		metric_results = metrics_from_conf(evaluate(model, dataset, dim, device))
-		runs[dim] = dict(label=f"CAN{dim}D", model=model, ds=dataset, metrics=metric_results)
-		print_table(f"CAN{dim}D", metric_results)
+			pairs = load_test_set(3, args.data_root, args.scale3d).pairs   # 3D pairs, to get patient/week
+			slices = matching_slices(args.data_root, pairs[0])     # sorted, one patient/week only
+			ds_patient = HipMRI2D(slices, scale)
+			for i in range(len(ds_patient)):
+				plot_item(model, ds_patient, i, device, dim, args.cls, i)
+		else:
+			plot_item(model, dataset, 0, device, dim, args.cls, 61)
 
-	compare_slice_metrics(
-	runs,
-	args.data_root,
-	args.vol,
-	args.cls,
-	device,
-	args.scale2d
-	)
+		# metric_results = metrics_from_conf(evaluate(model, dataset, dim, device)) # Evaluate runs on whole testset
+		# runs[dim] = dict(label=f"CAN{dim}D", model=model, dataset=dataset, metrics=metric_results)
+		# print_table(f"CAN{dim}D", metric_results)
+
+	# compare_slice_metrics(
+	# runs,
+	# args.data_root,
+	# args.vol,
+	# args.cls,
+	# device,
+	# args.scale2d
+	# )
 
 	# Visualization of 2D vs 3D segmentation
 	# cases = []
@@ -384,8 +421,5 @@ def main():
 	# 	mean, std, mem = time_mem_inference(model, x, device)
 	# 	print(f"{name}: {mean*1000:.1f} +/- {std*1000:.1f} ms per volume, peak {mem:.0f} MB")
 
-
-	# compare_slice_dice(runs, args.data_root, args.vol, args.cls,
-				#    os.path.join(args.out, "slice_dice.png"), device, args.scale2d, args.scale3d)
 if __name__ == "__main__":
 	main()

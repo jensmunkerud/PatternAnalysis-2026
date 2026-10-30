@@ -1,73 +1,109 @@
-# CAN 3D Prostate Segmentation Model
+# CAN 3D Prostate Segmentation Model [hard difficulty]
 
 Author: s5048803
 
+![A gif of the model predictions through a whole model](./results/3d_slices.gif)
+
 ## Folder structure
-1. modules.py: Containing the source code of the components of your model. Each component must be
-implemented as a class or a function in PyTorch or TensorFlow/Keras. Your implementation of the
-model should not depend on NumPy (or other Python libraries not part of PyTorch / TensorFlow)
-in any way unless otherwise approved by the teaching staff.
-2. dataset.py: Containing the data loader for loading and preprocessing your data, including leakagefree train/validation/test splitting functions and data augmentations.
-3. train.py: Containing the source code for training, validating, testing, and saving your model.
-The model should be imported from modules.py and the data loader should be imported from
-dataset.py. Make sure to plot the losses and metrics during training.
-4. predict.py: Showing example usage of your trained model. It should load your saved model
-weights, run inference on test cases, print out any results, and provide visualisations where applicable
-(e.g., prediction overlays, generated samples, heatmaps). NumPy is allowed in this script for
-visualization or loading data.
-5. README.md: Sufficiently documenting your project, working principles, feasibility review, experiments,
-and instructions (see Section 5.3).
 
-## Algorithm description
+```Folder-Structure
+CAN3D_s5048803/
+├── dataset.py				-> Dataloading / split train, validate & test equally
+├── modules.py				-> CAN2D / CAN3D Architecture
+├── train.py				-> Model trainer
+├── predict.py				-> Runs inference, generates visualizations and metrics in ./results
+├── requirements.txt
+├── README.md
+├── results/
+│   ├── 2d_slices/			-> Rendered segmentation & metrics through all slices of a 2D model
+│   │   └── ...
+│   ├── 3d_slices/			-> Rendered segmentation & metrics through all slices of a 3D model
+│   │   └── ...
+│   └── ...					-> Misc. results
+└── utils/
+    ├── model_graphic.py	-> Renders architecture figure
+    └── training_plotter.py	-> Plots training dice / loss figures
+```
 
-A title, a description of the algorithm and the problem that it solves (approximately a paragraph),
-how it works in a paragraph, and a figure/visualisation.
+## Problem Description
 
-This Context Aggregation Network (CAN) is an advanced machine learning model that keeps the input data at full resolution, specifically designed for medical segmentation. In this repo, a CAN3D model is developed for 3D medical MRI scans of the hip of men to segment the skeleton, bladder, rectum, prostate, body and background. It will be compared to a simpler CAN2D model, and the pros and cons of using a more advanced 3D model vs the simpler 2D model will be discussed. The network consist primarily of a daisy chain of 'Dilation blocks'. Each of these blocks will perform convolution with dilation, normalization and then activation. Different dilations are used for the blocks throughout the network to increase the receptive field, while balancing fine detail. The 'Context Aggregation' part of the network means that it continously aggregates more and more complex geometry in the feature maps. The network width in this example is set to 24, meaning 24 different feature maps. Lastly, a convolutional layer is used to group the internal featuremaps into the 6 different classes. LeakyRelu is used instead of regular Relu to avoid dead units. This is especially important with an architecture like this, where we have no skip connections and every gradient must pass through the whole network. It is quite a simple network while still providing remarkable results. 
+The task is to create a **Context Aggregation Network (CAN) to segment the prostate of 3D MRI images**. It will then be discussed whether a model designed for 3D data offers better segmentation than a 2D model operating on individual MRI slices and if this difference justifies its higher computational budget. Specifically, the model must:
 
-The model can be used to give a rough estimate of the segmentation of different organs and tissues, though this exact model is only tested on the 6 classes previously mentioned. It could speed up manual segmentation by medical personnell and increase existing datasets. 
+* Handle class imbalance (background vs organs)
+* Capture spatial context across all three dimensions
+* Maintain anatomical consistency across slices
+* Achieve a Dice coefficient ≥ 0.7 for all tissue classes
 
-![Model Architecture](./results/modelArchitecture.png)
+## Algorithm Description
 
+![Model Architecture](./results/model_architecture.png)
 
+This Context Aggregation Network (CAN) is an advanced machine learning model that keeps the input data at full resolution, specifically designed for medical segmentation. In this repo, a CAN3D model is developed for 3D medical MRI scans of the hip of men to segment the skeleton, bladder, rectum, prostate, body and background. It will be compared to a simpler CAN2D model, and the pros and cons of using a more advanced 3D model vs the simpler 2D model will be discussed. The network consist primarily of a daisy chain of 'Dilation blocks'. Each of these blocks will perform convolution with dilation, normalization and then activation. Different dilations are used for the blocks throughout the network to increase the receptive field, while balancing fine detail. The 'Context Aggregation' part of the network means that it continously aggregates more and more complex geometry in the feature maps. The network width in this example is set to 24, meaning 24 different feature maps. Lastly, a convolutional layer is used to group the internal featuremaps into the 6 different classes. LeakyRelu is used instead of regular Relu to avoid dead units. This is especially important with an architecture like this, where we have no skip connections and every gradient must pass through the whole network. It is quite a simple network while still providing remarkable results.
+
+The model can be used to give a rough estimate of the segmentation of different organs and tissues, though this exact model is only tested on the 6 classes previously mentioned. It could speed up manual segmentation by medical personnell and increase existing datasets.
 
 ## Dependencies
 
-`torch >= 2.14.0` 
-`torchvision >= 0.29.0` 
-`numpy >= 1.26.4` 
-`nibabel >= 5.4.2` 
-`matplotlib >= 3.10.8` 
-`tqdm >= 4.70.1` 
+`torch ≥ 2.14.0`
+`torchvision ≥ 0.29.0`
+`numpy ≥ 1.26.4`
+`nibabel ≥ 5.4.2`
+`matplotlib ≥ 3.10.8`
+`tqdm ≥ 4.70.1`
 A requirements.txt is included
 
 ## Reproducibility
 
+The model has been trained using the following command. To train the 2D model, use `--model can2d` instead. The scaling factor indicates the scale of the data before it enters the network.
+More of the command-line arguments can be found in `train.py`.
+
+```bash
+python train.py --epochs 20 --scale 0.5 --model can3d
+```
+
 ## Preparing the dataset
 
-Description of any specific pre-processing used, with references if any. Justify your training,
-validation, and testing splits of the data.
 The 3D dataset contains 38 patients with 3D MRI scans from several consecutive weeks, totaling 211 samples. The 2D dataset has extracted 2D slices of this same dataset and is already split into 11460 for training 660 for validation and 540 for test, totaling 12660 samples. The 2D dataset does not contain a single patient in multiple splits. `dataset.py` therefore compares the patient ID of the 2D and 3D datasets and splits the 3D dataset in the same way, dropping the sample if it does not find a perfect match.
 
 Below is the patient ids of the pre-split 2D dataset, taken from the `dataset.py`.
-`train{'008', '019', '016', '020', '010', '011', '007', '012', '025', '032', '024', '027', '018', '026', '021', '013', '033', '006', '035', '030', '029', '015', '017', '022', '005', '023', '031', '004', '028', '009', '014'}
-val{'038', '039', '037', '036'}
-test{'040', '042', '041'}`
+`train{'008', '019', '016', '020', '010', '011', '007', '012', '025', '032', '024', '027', '018', '026', '021', '013', '033', '006', '035', '030', '029', '015', '017', '022', '005', '023', '031', '004', '028', '009', '014'} val{'038', '039', '037', '036'} test{'040', '042', '041'}`
 
 The following is the split made by the 3D dataset, proving there is no leakage and that it perfectly reflects the same patient split as the 2D set.
 `{'train': {'035', '013', '029', '024', '010', '007', '011', '031', '020', '021', '015', '017', '008', '025', '030', '014', '032', '016', '019', '005', '012', '033', '009', '004', '022', '026', '023', '027', '018', '028', '006'}, 'val': {'039', '036', '038', '037'}, 'test': {'042', '041', '040'}}`
 
+Note: The per-class dice is volatile after ~5 epochs, but the loss keeps decreasing hence the model is still improving overall.
+![2d model training](./results/can2d_training.png)
+![3d model training](./results/can3d_training.png)
+
 ## Results
 
-### Overcoverage / Undercoverage
+### Over-contouring / Under-contouring
+
+predict.py's `compare_slice_metrics` calculates four metrics per slice through the whole MRI volume, for both the 2D and 3D network. This gives a great insight into each models performance in different parts of the prostate. Strict patient and layer matching is enforced to ensure comparable data. We see that the Dice score performs great for both models, though slightly better in the 3D in some cases. Most notably, the 2D networks' over-contouring sometimes appear nowhere close to the prostate, perhaps due to it being less spacially aware between the slices then the 3D model. It seems however that no model is dramatically better than the other one. More results are in [results](./results).
+
+#### Slice metrics for volume 0 in test set
+
+![Per-slice data](./results/can_depth_comparison_vol0.png)
+
+#### Slice metrics for volume 2 in test set
+
+![Per-slice data](./results/can_depth_comparison_vol2.png)
 
 ### Small prostate
+
 Investigate the over-contouring near the base of the prostate, the 2d performed way worse than 3d here no? like 900% overcontouring
+At the base / apex of the prostate, the segmentation is very small. The 2D model performs very badly when at these parts of the prostate, as shown below
+
+![2d small artifact](./results/can2d_slice.png)
+![3d small artifact](./results/can2d_slice.png)
 
 ### Stray floating artifacts
 
+![Segmentation artifact](./results/Artifacts.png)
+For a given layer the CAN2D baseline model seems to be experiencing a lot more artifacts in its segmentation, than the CAN3D. While they both occasionally have a lone floating blob deep inside the wrong class, this happens more often to the 2D model (see [2d slices](./results/2d_slices/) and [3d slices](./results/3d_slices/)). The CAN2D also occasionally has perforated striations in large areas, that differ completely from layer to layer. This could be a sign of the CAN2D models' lesser spacial awareness in the 3rd dimension compared to the CAN3D model. While this does not directly happen as much to the prostate class, none of the models have any class preference, leading to it affecting all classes to some degree.
 
-### 2d vs 3d results etc etc
+![3D model segmentation / metrics through slices](./results/3d_slices.gif)
+![2D model segmentation / metrics through slices](./results/2d_slices.gif)
 
 Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are made on a 16GB M2 Mac.
 
@@ -78,6 +114,7 @@ Training has been done on a Nvidia A100 40GB GPU, while inference and prediction
 
 Resource profiling table documenting computational efficiency (peak GPU VRAM, parameter
 count, and inference runtime/latency).
+
 | TYPE  | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
 | ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
 | CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 935.5 +/- 5.6       | 1131                  |
@@ -94,8 +131,7 @@ a total of 10 times.
 ### Recommendations
 
 Actionable engineering recommendation and trade-off synthesis for your project manager.
-
-jargon
+The results have shown that the 2D model vs 3D 
 
 ## Notes
 
