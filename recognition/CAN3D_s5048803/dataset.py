@@ -36,52 +36,54 @@ def get_slices(root, split):
 	"""(image, label) slice pairs for split in {'train', 'val', 'test'}."""
 	d2 = os.path.join(root, layout()["d2"])
 	name = SLICE_DIRS[split]
-	imgs = sorted(glob.glob(os.path.join(d2, f"keras_slices_{name}", "*.nii.gz")))  # skips stray .nii
+	images = sorted(glob.glob(os.path.join(d2, f"keras_slices_{name}", "*.nii.gz")))  # skips stray .nii
 	segs = {slice_key(p): p for p in glob.glob(os.path.join(d2, f"keras_slices_seg_{name}", "*.nii.gz"))}
-	pairs = [(i, segs[slice_key(i)]) for i in imgs if slice_key(i) in segs]
+	pairs = [(i, segs[slice_key(i)]) for i in images if slice_key(i) in segs]
 	assert pairs, f"No 2D slices found for split '{split}' under {d2}"
 	if DEBUG:
 		print(split, end="")
-		print(set(([slice_key(i)[0] for i in imgs])))
+		print(set(([slice_key(i)[0] for i in images])))
 	return pairs
 
 class HipMRI2D(Dataset):
 	"""One slice per item: image (1, H, W) float, label (H, W) long.
 	Every slice is decoded, padded and scaled once here, so epochs only index into memory."""
 	def __init__(self, pairs, scale):
-		imgs, lbls = [], []
-		for ip, lp in pairs:
-			img = nib.load(ip).get_fdata(caching="unchanged")
-			lbl = nib.load(lp).get_fdata(caching="unchanged")
-			if img.ndim == 3: img = img[..., 0]          # some files carry an extra axis
-			if lbl.ndim == 3: lbl = lbl[..., 0]
-			img = (img - img.mean()) / (img.std() + 1e-8) # Normalization
-			img = torch.from_numpy(img.astype(np.float32))[None, None]
-			lbl = torch.from_numpy(np.rint(lbl).astype(np.float32))[None, None]
+		images, labels = [], []
+		for image_path, label_path in pairs:
+			image = nib.load(image_path).get_fdata(caching="unchanged")
+			label = nib.load(label_path).get_fdata(caching="unchanged")
+			if image.ndim == 3: image = image[..., 0] # some files carry an extra axis
+			if label.ndim == 3: label = label[..., 0]
+			image = (image - image.mean()) / (image.std() + 1e-8) # Normalization
+			image = torch.from_numpy(image.astype(np.float32))[None, None]
+			label = torch.from_numpy(np.rint(label).astype(np.float32))[None, None]
 
 			# slices come in different widths (e.g. 128 and 144): pad to a common size so batches can stack
-			pad_h = max(0, 256 - img.shape[-2])
-			pad_w = max(0, 144 - img.shape[-1])
-			img = F.pad(img, (0, pad_w, 0, pad_h))   # pads with 0 (the mean after z-scoring)
-			lbl = F.pad(lbl, (0, pad_w, 0, pad_h))   # pads with 0 = background
+			pad_h = max(0, 256 - image.shape[-2])
+			pad_w = max(0, 144 - image.shape[-1])
+			image = F.pad(image, (0, pad_w, 0, pad_h))   # pads with 0 (the mean after z-scoring)
+			label = F.pad(label, (0, pad_w, 0, pad_h))   # pads with 0 = background
 
 			if scale != 1:
-				img = F.interpolate(img, scale_factor=scale, mode="bilinear", align_corners=False)
-				lbl = F.interpolate(lbl, scale_factor=scale, mode="nearest")
-			imgs.append(img[0])                          # (1, H, W)
-			lbls.append(lbl[0, 0].to(torch.uint8))       # (H, W), small in memory
-		self.imgs, self.lbls = torch.stack(imgs), torch.stack(lbls)
+				image = F.interpolate(image, scale_factor=scale, mode="bilinear", align_corners=False)
+				label = F.interpolate(label, scale_factor=scale, mode="nearest")
+			images.append(image[0])                          # (1, H, W)
+			labels.append(label[0, 0].to(torch.uint8))       # (H, W), small in memory
+		self.images, self.labels = torch.stack(images), torch.stack(labels)
 
 	def __len__(self):
-		return len(self.imgs)
+		return len(self.images)
 
 	def __getitem__(self, i):
-		return self.imgs[i], self.lbls[i].long()
+		return self.images[i], self.labels[i].long()
 
-# 3D loading
-# The key is what differentiates different patients
 def key(path):
-	"""'Case_004_Week0_LFOV.nii.gz' or 'M004_Week1_SEMANTIC.nii.gz' -> ('004', '0')."""
+	"""
+	3D loading
+	The key is what differentiates different patients.
+	'Case_004_Week0_LFOV.nii.gz' or 'M004_Week1_SEMANTIC.nii.gz' -> ('004', '0').
+	"""
 	return re.search(r"(?:Case_|[A-Z])(\d+)_Week(\d+)", os.path.basename(path), re.I).groups()
 
 def patient_id(pair):
@@ -90,15 +92,15 @@ def patient_id(pair):
 def get_pairs(root):
 	"""Match every MRI with its label by (patient, week): [(img_path, lbl_path), ...]."""
 	L = layout()
-	imgs = sorted(glob.glob(os.path.join(root, L["mr"], "*.nii.gz")))
-	lbls = {key(p): p for p in glob.glob(os.path.join(root, L["lbl"], "*.nii.gz"))}
-	pairs = [(i, lbls[key(i)]) for i in imgs if key(i) in lbls]
+	images = sorted(glob.glob(os.path.join(root, L["mr"], "*.nii.gz")))
+	labels = {key(p): p for p in glob.glob(os.path.join(root, L["lbl"], "*.nii.gz"))}
+	pairs = [(i, labels[key(i)]) for i in images if key(i) in labels]
 	assert pairs, f"No image/label pairs under {os.path.join(root, L['mr'])}"
 	return pairs
 
 def split_pairs(root, pairs, seed=42, frac=(0.7, 0.15, 0.15)):
 	"""Patient-level split. Uses the patients in the course's 2D train/validate/test
-	folders so CAN2D and CAN3D share the same test patients."""
+	folders so CAN2D and CAN3D share the same test patients. frac is fallback if the pre-split cant be found"""
 	d2 = os.path.join(root, layout()["d2"])
 	ids = {}
 	for split, name in SLICE_DIRS.items():
@@ -107,12 +109,13 @@ def split_pairs(root, pairs, seed=42, frac=(0.7, 0.15, 0.15)):
 	if DEBUG:
 		print(ids) # Print to verify 3D split
 
-	if not all(ids.values()):          # 2D folders missing -> random patient split
+	if not all(ids.values()): # 2D folders missing -> random patient split
 		print("WARNING: 2D split not found, using random patient split")
-		pids = sorted({patient_id(p) for p in pairs})
-		random.Random(seed).shuffle(pids)
-		a, b = int(frac[0] * len(pids)), int((frac[0] + frac[1]) * len(pids))
-		ids = {"train": set(pids[:a]), "val": set(pids[a:b]), "test": set(pids[b:])}
+		patient_ids = sorted({patient_id(p) for p in pairs})
+		random.Random(seed).shuffle(patient_ids)
+		end_train = int(frac[0] * len(patient_ids))
+		end_val = int((frac[0] + frac[1]) * len(patient_ids))
+		ids = {"train": set(patient_ids[:end_train]), "val": set(patient_ids[end_train:end_val]), "test": set(patient_ids[end_val:])}
 
 	# leakage check: no patient in two splits
 	assert not (ids["train"] & ids["val"] or ids["train"] & ids["test"] or ids["val"] & ids["test"])
@@ -127,21 +130,21 @@ class HipMRI3D(Dataset):
 		return len(self.pairs)
 
 	def __getitem__(self, i):
-		ip, lp = self.pairs[i]
-		img = nib.load(ip).get_fdata(caching="unchanged")
-		lbl = nib.load(lp).get_fdata(caching="unchanged")
-		if img.ndim == 4: img = img[..., 0]
-		if lbl.ndim == 4: lbl = lbl[..., 0]
-		img = (img - img.mean()) / (img.std() + 1e-8) # Normalization
+		image_path, label_path = self.pairs[i]
+		image = nib.load(image_path).get_fdata(caching="unchanged")
+		label = nib.load(label_path).get_fdata(caching="unchanged")
+		if image.ndim == 4: image = image[..., 0]
+		if label.ndim == 4: label = label[..., 0]
+		image = (image - image.mean()) / (image.std() + 1e-8) # Normalization
 		# files are (H, W, D); model wants (D, H, W); add batch+channel axes for interpolate
-		img = torch.from_numpy(img.astype(np.float32)).permute(2, 0, 1)[None, None]
-		lbl = torch.from_numpy(np.rint(lbl).astype(np.float32)).permute(2, 0, 1)[None, None]
+		image = torch.from_numpy(image.astype(np.float32)).permute(2, 0, 1)[None, None]
+		label = torch.from_numpy(np.rint(label).astype(np.float32)).permute(2, 0, 1)[None, None]
 		if self.scale != 1:
-			img = F.interpolate(img, scale_factor=self.scale, mode="trilinear", align_corners=False)
-			lbl = F.interpolate(lbl, scale_factor=self.scale, mode="nearest")  # keeps class IDs intact
-		img, lbl = img[0], lbl[0, 0].long()          # img (1,D,H,W), lbl (D,H,W)
+			image = F.interpolate(image, scale_factor=self.scale, mode="trilinear", align_corners=False)
+			label = F.interpolate(label, scale_factor=self.scale, mode="nearest")  # keeps class IDs intact
+		image, label = image[0], label[0, 0].long() # image (1,D,H,W), label (D,H,W)
 		if self.augment:
-			if torch.rand(1) < 0.5:                   # flip left-right (last axis)
-				img, lbl = img.flip(-2), lbl.flip(-2)
-			img = img * (1 + 0.1 * torch.randn(1)) + 0.1 * torch.randn(1)   # intensity scale/shift
-		return img, lbl
+			if torch.rand(1) < 0.5: # flip left-right (last axis)
+				image, label = image.flip(-2), label.flip(-2)
+			image = image * (1 + 0.1 * torch.randn(1)) + 0.1 * torch.randn(1)   # intensity scale/shift
+		return image, label
