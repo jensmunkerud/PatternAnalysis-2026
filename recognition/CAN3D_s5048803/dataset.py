@@ -144,7 +144,7 @@ class HipMRI3D(Dataset):
 			label = F.interpolate(label, scale_factor=self.scale, mode="nearest")  # keeps class IDs intact
 		image, label = image[0], label[0, 0].long() # image (1,D,H,W), label (D,H,W)
 		if self.augment:
-			if torch.rand(1) < 0.5: # flip left-right (last axis)
+			if torch.rand(1) < 0.5: # flip left-right
 				image, label = image.flip(-2), label.flip(-2)
 			image = image * (1 + 0.1 * torch.randn(1)) + 0.1 * torch.randn(1)   # intensity scale/shift
 		return image, label

@@ -6,7 +6,6 @@ visualization or loading data.
 
 Usage:
 	python predict.py --weights2d models/can2d_best.pt --weights3d models/can3d_best.pt
-	python predict.py --weights2d models/can2d_best.pt --weights3d models/can3d_best.pt
 """
 
 import argparse, os
@@ -182,7 +181,7 @@ def mem_mb(device):
 
 @torch.no_grad()
 def time_mem_inference(model, x, device, warmup=3, runs=10):
-	"""Mean/std seconds for one forward pass of x (shaped [B, C, ...]) and peak GPU memory in MB (NaN off CUDA)."""
+	"""Mean/std seconds for one forward pass of x (shaped [B, C, ...]) and peak GPU memory in MB."""
 	x = x.to(device)
 	sync = torch.cuda.synchronize if device == "cuda" else (torch.mps.synchronize if device == "mps" else (lambda: None))
 	if device == "mps":
@@ -343,7 +342,7 @@ def main():
 	ap.add_argument("--cls", type=int, default=5, help="Class to plot metrics of (5=prostate)")
 	ap.add_argument("--out", default="results", help="Folder to put model results")
 	ap.add_argument("--data_root", default="/home/groups/comp3710/HipMRI_Study_open" if RANGPUR_MODE else ".")
-	ap.add_argument("--show_total_error", type=bool, default=False, help="True -> plot total error in sliceprediction, False -> plot fp / fn in sliceprediction")
+	ap.add_argument("--show_total_error", type='store_true', default=False, help="True -> plot total error in sliceprediction, False -> plot fp / fn in sliceprediction")
 	args = ap.parse_args()
 	os.makedirs(args.out, exist_ok=True)
 	device = get_device()
@@ -352,7 +351,7 @@ def main():
 	runs = {} # Holds dataset and metrics of entire testset for both models
 	for dim, weights, scale, split in ((3, args.weights3d, args.scale3d, "test"),
 	                                   (2, args.weights2d, args.scale2d, "test"),
-	                                   (3, args.weights3d, args.scale2d, "val"),
+	                                   (3, args.weights3d, args.scale3d, "val"),
 	                                   (2, args.weights2d, args.scale2d, "val")):
 		model = load_model(weights, dim, device)
 		dataset = load_set(dim, args.data_root, scale, split)
@@ -367,7 +366,7 @@ def main():
 	# Run both models on a complete volume / set of slices
 	pairs = load_set(3, args.data_root, args.scale3d).pairs # 3D pairs, to get patient/week
 	slices = matching_slices(args.data_root, pairs[0]) # sorted, one patient/week only
-	ds_patient = HipMRI2D(slices, scale)
+	ds_patient = HipMRI2D(slices, args.scale2d)
 	for i in range(len(ds_patient)):
 		plot_item(runs[2]["model"], ds_patient, i, device, 2, args.cls, i, show_total_error=args.show_total_error)
 	for i in range(128):

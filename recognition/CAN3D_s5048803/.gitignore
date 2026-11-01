@@ -11,7 +11,7 @@ results/2d_slices/*
 results/3d_slices/*
 
 !results/2d_slices/can2d_slice_25.png
-!results/3d_slices/can3d_slice_64.png
+!results/3d_slices/can3d_slice_64_ax2.png
 
 # General macOS files
 .DS_Store

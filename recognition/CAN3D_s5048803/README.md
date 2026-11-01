@@ -4,8 +4,8 @@ Author: s5048803
 
 | Model | Params | Prostate Dice | Mean fg Dice | Inference / volume |
 | ----- | ------ | ------------- | ------------ | ------------------ |
-| CAN2D | 21,222 | 0.828 | 0.897 | 94.5 ms |
-| CAN3D | 63,126 | 0.864 | 0.890 | 935.5 ms |
+| CAN2D | 21,222 | 0.828         | 0.897        | 94.5 ms            |
+| CAN3D | 63,126 | 0.864         | 0.890        | 935.5 ms           |
 
 ![A gif of the model predictions through a whole model](./results/3d_slices.gif)
 
@@ -21,6 +21,12 @@ CAN3D_s5048803/
 ├── README.md
 ├── models/					-> Default location for .pt files
 ├── results/
+├── HipMRI_2D/
+│	├── keras_slices_{train,validate,test}/        -> 2D MRI slices
+│	└── keras_slices_seg_{train,validate,test}/    -> 2D label slices
+├── HipMRI_3D/
+│	├── semantic_MRs_anon/                         -> 3D MRI volumes
+│	└── semantic_labels_anon/                      -> 3D label volumes
 │   ├── 2d_slices/			-> Rendered segmentation & metrics through all slices of a 2D model
 │   │   └── ...
 │   ├── 3d_slices/			-> Rendered segmentation & metrics through all slices of a 3D model
@@ -35,10 +41,10 @@ CAN3D_s5048803/
 
 The task is to create a **Context Aggregation Network (CAN) to segment the prostate of 3D MRI images**. It will then be discussed whether a model designed for 3D data offers better segmentation than a 2D model operating on individual MRI slices and if this difference justifies its higher computational budget. The acceptance criteria are:
 
-* Overall Dice accuracy must be >= 0.75 for both 2D and 3D
+* Overall Dice accuracy must be ≥ 0.75 for both 2D and 3D
 * Peak VRAM must be < 40GB to fit on the A100 during training
-* Peak inference memory <= 8GB preferably, absolute max 16GB to run on end-user hardware.
-* Difference between train and validation Dice <= 0.1 to prevent overfitting on such a small dataset (preferably <= 0.05)
+* Peak inference memory ≤ 8GB preferably, absolute max 16GB to run on end-user hardware.
+* Difference between train and validation Dice ≤ 0.1 to prevent overfitting on such a small dataset (preferably ≤ 0.05)
 * Inference runs in <10 seconds on M2 mac
 
 ## Algorithm Description
@@ -73,7 +79,6 @@ The following is the patient IDs of the split made by the 3D dataset, proving th
 `{'train': {'035', '013', '029', '024', '010', '007', '011', '031', '020', '021', '015', '017', '008', '025', '030', '014', '032', '016', '019', '005', '012', '033', '009', '004', '022', '026', '023', '027', '018', '028', '006'}, 'val': {'039', '036', '038', '037'}, 'test': {'042', '041', '040'}}`
 
 This gives the following splits
-
 | MODEL | TRAIN        | VALIDATE  | TEST      | TOTAL  |
 | ----- | ------------ | --------- | --------- | ------ |
 | CAN2D | 90.5%, 11460 | 5.2%, 660 | 4.2%, 540 | 12 660 |
@@ -83,10 +88,10 @@ This gives the following splits
 
 ### Dependencies
 
-`torch ≥ 2.14.0`
-`numpy ≥ 1.26.4`
-`nibabel ≥ 5.4.2`
-`matplotlib ≥ 3.10.8`
+`torch ≥ 2.14.0` \
+`numpy ≥ 1.26.4` \
+`nibabel ≥ 5.4.2` \
+`matplotlib ≥ 3.10.8` \
 A requirements.txt is included
 
 ### Setting up the repository and virtual environment
@@ -109,10 +114,13 @@ The model has been trained using the following command. The scaling factor indic
 ```bash
 python train.py --epochs 20 --scale 0.5 --model can3d --seed 16
 ```
+
 or
+
 ```bash
 python train.py --epochs 20 --scale 0.5 --model can2d --seed 16 --batch 16
 ```
+
 for the 2D model.
 
 Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are from a 16GB M2 Mac.
@@ -152,6 +160,16 @@ over-contouring = 100\*FP / (TP + FN), under-contouring = 100\*FN / (TP + FN).
 ![3D Axis 1](./results/can3d_slice_30_ax0.png)
 ![3D Axis 2](./results/can3d_slice_61_ax1.png)
 ![3D Axis 3](./results/can3d_slice_61_ax2.png)
+
+### Resource profiling
+
+| MODEL | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
+| ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
+| CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 94.5 +/- 0.3        | 1131                  |
+| CAN3D | 63 126     | 24    | 20     | 00:10:19      | 3384672K = 3.3GB   | 935.5 +/- 5.6       | 1155                  |
+
+Note: Inference was run on a single 3D volume for CAN3D, while an equivalent amount of slices for the CAN2D,
+a total of 10 times.
 
 From the `predict.py` we get pooled metrics for both models. The pooled dice is also plotted and compared below. It is apparent that the two models perform almost the same.
 
@@ -208,45 +226,45 @@ However, when we plot the different metrics layer by layer, we get a better pict
 ![Per-slice data](./results/can_depth_comparison_vol2.png)
 From this plot it is clear that the 2D model struggles to keep the spatial continuity, and occasionally detects a prostate far outside it's anatomical region. The Dice score of the CAN3D model seems overall more stable, though both models taper off at the ends of the prostate.
 
-### Resource profiling
-
-| MODEL | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
-| ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
-| CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 94.5 +/- 0.3        | 1131                  |
-| CAN3D | 63 126     | 24    | 20     | 00:10:19      | 3384672K = 3.3GB   | 935.5 +/- 5.6       | 1155                  |
-
-Note: Inference was run on a single 3D volume for CAN3D, while an equivalent amount of slices for the CAN2D,
-a total of 10 times.
-
 ### Failure cases
 
-#### Case 1: Adjoined objects around the prostate
+For reference, a normal slice looks like this:
+![regular slice](./results/can3d_slice_61_ax2.png)
+Percentages are relative to the ground-truth area. Where ground-truth is absent, they are relative to one pixel.
+
+#### Case 1: Small prostate (Over and under-contouring)
+
+Where the GT holds only a handful of prostate pixels (5 for CAN3D slice 57), both models draw a blob several times larger and cover the true pixels completely
+(CAN2D under 0%). CAN2D also predicts prostate on slices 14-15, before the GT prostate begins (~20-26 false pixels) in the [metrics through slices on volume 0](#slice-metrics-for-volume-0-in-test-set) figure. CAN3D shows no activity before slice 16.
+On test volume 0 slice 17, the CAN2D model wrongfully over-contours the prostate by 925%.
+On test volume 0 slice 57, the CAN3D model over-contours the prostate by 225%.
+This is likely triggered by how small the prostate is around this area, aswell as the challenging section between the rectum and prostate. At 0.5 scale one pixel is 2 original voxels per axis, so the tip is only a few pixels wide. Furthermore, Cross-entropy weights every pixel equally, so ~10
+spurious pixels cost almost nothing next to thousands of body pixels. Also, the border between the bladder and rectum offer weak contrast, and is a challenging section that needs special attention from medical  personnell.
+Part of this can be mitigated by increasing the scaling of the data before it enters the network. A class-weighted loss function could train the models to work better for the smaller prostate organ.
+
+![2d small artifact](./results/can2d_overcontouring.png)
+![3d small artifact](./results/can3d_overcontouring.png)
+
+#### Case 2: Stray floating artifacts
+
+For a given layer the CAN2D baseline model seems to be experiencing a lot more artifacts in its segmentation, than the CAN3D. While they both occasionally have a lone floating blob deep inside the wrong class, this happens more often to the 2D model (see [2d slices](./results/2d_slices/) and [3d slices](./results/3d_slices/)). The CAN2D also occasionally has perforated striations in large areas, that differ completely from layer to layer. A likely trigger of this is the CAN2D models' lesser spatial awareness in the 3rd dimension compared to the CAN3D model. While this does not directly happen as much to the prostate class, none of the models have any class preference, leading to it affecting all classes to some degree.
+This effect could be mitigated by enforcing a minimum component size per class, or a post-filter that removes class predictions not connected.
+
+![Segmentation artifact](./results/Artifacts.png)
+
+#### Case 3: Loss of spacial continuity
+
+An extension of the previously mentioned artifacts is the smoothness of the edges of the segmentation. Below is an animation of the models results through the layers of the MRI scan. It is clear that the CAN3D model produces overall more smooth edges than the 2D, and has a better spacial continuity.
+![3D model segmentation / metrics through slices](./results/3d_slices.gif)
+![2D model segmentation / metrics through slices](./results/2d_slices.gif)
+The cause of this is most likely that CAN2D predicts each slice independently, meaning small errors lead to discontinous slices. The CAN3D model takes the whole volume in consideration at once, meaning it better understands where an organ starts / stops. The jagged edges are also likely to come from the fact that CAN3D is a bigger network. With ~3x the parameters, it can represent a lot more complex structures than the lighter CAN2D. And when the CAN3D model produces more smooth edges, it naturally produces more accurate anatomical structures.
+
+#### Case 4: Adjoined objects around the prostate
 
 Adjoined objects would be when two or more classes get joined together and classified as one. This is not a severe problem for any of the models, possibly due to the one-hot encoding used. We clearly see both models classifying each separate class independently, at least in the central slices.
 
 ![2d adjoined](./results/can2d_adjoined.png)
 ![3d adjoined](./results/can3d_adjoined.png)
-
-#### Case 2: Small prostate (Over and under-contouring)
-
-At the far ends of the prostate slices, the segmentation is very small. Both models suffer from over-contouring in these areas, but the 2D model usually performs worse. This is where the 3D models inherent spatial context delivers more anatomical consistency.
-On patient 0 (in the test set) slice 17, the CAN2D model wrongfully over-contours the prostate by 925%.
-On patient 0 (in the test set) slice 57, the CAN3D model over-contours the prostate by 225%.
-This is likely triggered by how small the prostate is around this area, aswell as the challenging section between the rectum and prostate. I expect this to be mitigated by increasing the data resolution, though I expect CAN3D to have an advantage in this part either way.
-
-![2d small artifact](./results/can2d_overcontouring.png)
-![3d small artifact](./results/can3d_overcontouring.png)
-
-#### Case 3: Stray floating artifacts
-
-For a given layer the CAN2D baseline model seems to be experiencing a lot more artifacts in its segmentation, than the CAN3D. While they both occasionally have a lone floating blob deep inside the wrong class, this happens more often to the 2D model (see [2d slices](./results/2d_slices/) and [3d slices](./results/3d_slices/)). The CAN2D also occasionally has perforated striations in large areas, that differ completely from layer to layer. This could be a sign of the CAN2D models' lesser spatial awareness in the 3rd dimension compared to the CAN3D model. While this does not directly happen as much to the prostate class, none of the models have any class preference, leading to it affecting all classes to some degree.
-![Segmentation artifact](./results/Artifacts.png)
-
-#### Case 4: Jagged edges
-
-An extension of the previously mentioned artifacts is the smoothness of the edges of the segmentation. Below is an animation of the models results through the layers of the MRI scan. It is clear that the CAN3D model produces overall more smooth edges than the 2D.
-![3D model segmentation / metrics through slices](./results/3d_slices.gif)
-![2D model segmentation / metrics through slices](./results/2d_slices.gif)
 
 ### Acceptance criteria
 
@@ -280,7 +298,7 @@ Train at full resolution, and explore expanding the width of the network in cert
 ### User Need, Scope & Acceptance Criteria
 
 This machine learning model is intended to give certified personnell a rough segmentation of the prostate in 2d and 3d MRI data. It could cut down time and cost of such work. Because of this its important that the model is fast and light to run. A baseline CAN2D model will work on individual slices while a CAN3D version will work on fully 3d MRI data. They will then be compared.
-The a100 gpu used for training have about 40GB ram. 
+The a100 gpu used for training have about 40GB ram.
 
 I'll specifically inspect these boundary failure cases:
 

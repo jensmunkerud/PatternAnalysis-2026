@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 
 CLASS_NAMES = ["background", "body", "skeleton", "bladder", "rectum", "prostate"]
 
-with open("../outputs/can2d_20epoch.out", "r") as f:
+with open("../results/can2d_20epoch.out", "r") as f:
 	text = f.read()
 
 loss = []
