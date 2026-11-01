@@ -238,8 +238,7 @@ Where the GT holds only a handful of prostate pixels (5 for CAN3D slice 57), bot
 (CAN2D under 0%). CAN2D also predicts prostate on slices 14-15, before the GT prostate begins (~20-26 false pixels) in the [metrics through slices on volume 0](#slice-metrics-for-volume-0-in-test-set) figure. CAN3D shows no activity before slice 16.
 On test volume 0 slice 17, the CAN2D model wrongfully over-contours the prostate by 925%.
 On test volume 0 slice 57, the CAN3D model over-contours the prostate by 225%.
-This is likely triggered by how small the prostate is around this area, aswell as the challenging section between the rectum and prostate. At 0.5 scale one pixel is 2 original voxels per axis, so the tip is only a few pixels wide. Furthermore, Cross-entropy weights every pixel equally, so ~10
-spurious pixels cost almost nothing next to thousands of body pixels. Also, the border between the bladder and rectum offer weak contrast, and is a challenging section that needs special attention from medical  personnell.
+This is likely triggered by how small the prostate is around this area, aswell as the challenging section between the rectum and prostate. At 0.5 scale one pixel is 2 original voxels per axis, so the tip is only a few pixels wide. Also, the border between the bladder and rectum offer weak contrast, and is a challenging section that needs special attention from medical  personnell.
 Part of this can be mitigated by increasing the scaling of the data before it enters the network. A class-weighted loss function could train the models to work better for the smaller prostate organ.
 
 ![2d small artifact](./results/can2d_overcontouring.png)
