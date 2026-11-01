@@ -5,8 +5,8 @@ weights, run inference on test cases, print out any results, and provide visuali
 visualization or loading data.
 
 Usage:
-	python predict.py --model can3d --weights outputs/can3d_best.pt
-	python predict.py --model can2d --weights outputs/can2d_best.pt
+	python predict.py --model can3d --weights models/can3d_best.pt
+	python predict.py --model can2d --weights models/can2d_best.pt
 """
 
 import argparse, os
@@ -40,7 +40,7 @@ def load_test_set(dim, root, scale):
 
 
 def planes(t):
-	"""Stack of 2D planes cut along axis 2, same layout as 2D slice"""
+	"""Stack of 2D planes cut along axis 2 (coronal), same layout as 2D slice"""
 	return t.movedim(2, 0).transpose(1, 2)
 
 
@@ -79,12 +79,13 @@ def evaluate(model, dataset, dim, device):
 	return conf.cpu()
 
 
-def print_table(name, m):
+def print_table(name, metric_result):
+	"""Print Dice, IoU, over -and under contouring for all foreground classes"""
 	print(f"{name}, test set:")
 	for i, cname in enumerate(FG_NAMES):
-		print(f"  {cname:>8}: Dice {m['dice'][i]:.3f}  IoU {m['iou'][i]:.3f}  "
-			  f"over {m['over'][i]:.1f}%  under {m['under'][i]:.1f}%")
-	print(f"  mean foreground: Dice {m['dice'][1:].mean():.3f}  IoU {m['iou'][1:].mean():.3f}")
+		print(f"  {cname:>8}: Dice {metric_result['dice'][i]:.3f}  IoU {metric_result['iou'][i]:.3f}  "
+			  f"over {metric_result['over'][i]:.1f}%  under {metric_result['under'][i]:.1f}%")
+	print(f"  mean foreground: Dice {metric_result['dice'][1:].mean():.3f}  IoU {metric_result['iou'][1:].mean():.3f}")
 
 
 def pick_cases(ds, cls, n):
@@ -102,11 +103,16 @@ def plot_item(model, dataset, patient, device, dim, cls, index=32, batch=True):
 	pred = model(x[None].to(device)).argmax(1)[0].cpu()
 
 	if dim == 3:
-		img, gt, pred = planes(x[0]), planes(y), planes(pred)
-		img, gt, pred = img[index], gt[index], pred[index]
+		img = planes(x[0])
+		gt = planes(y)
+		pred = planes(pred)
+		img = img[index]
+		gt = gt[index]
+		pred = pred[index]
 		name = f"CAN3D patient {patient}, slice {index}"
 	else:
-		img, gt, pred = x[0], y, pred
+		img = x[0]
+		gt = y
 		name = f"CAN2D slice {patient}"
 
 	metric_results = metrics(pred, gt)
@@ -141,18 +147,19 @@ def plot_item(model, dataset, patient, device, dim, cls, index=32, batch=True):
 def run_cases(model, dataset, dim, label, cls, n, device):
 	"""Predict n example items. Case stats cover the whole item: the full volume for 3D, the slice for 2D."""
 	cases = []
-	for i in pick_cases(dataset, cls, n):
+	# for i in pick_cases(dataset, cls, n):
+	for i in (1, 2, 3, 4):
 		x, y = dataset[i]
 		pred = model(x[None].to(device)).argmax(1)[0].cpu()
-		m = metrics(confusion(pred, y))
+		metric_results = metrics(pred, y)
 		
 		if dim == 3: # show the slice with most of the class
 			s = (y == cls).sum((1, 2)).argmax()
 			img, gt, pr = x[0, s], y[s], pred[s]
 		else:
 			img, gt, pr = x[0], y, pred
-		cases.append(dict(label=label, index=i, img=img, gt=gt, pred=pr, iou=m["iou"][cls-1].item(),
-						  over=m["over"][cls-1].item(), under=m["under"][cls-1].item()))
+		cases.append(dict(label=label, index=i, img=img, gt=gt, pred=pr, iou=metric_results["iou"][cls-1].item(),
+						  over=metric_results["over"][cls-1].item(), under=metric_results["under"][cls-1].item()))
 	return cases
 
 def plot_cases(cases, path):
@@ -351,14 +358,13 @@ def matching_slices(root, pair3d):
 	pid, week = key(pair3d[0])
 	slices = [p for p in get_slices(root, "test")
 		  if slice_key(p[0])[0] == pid and slice_key(p[0])[1] == week]
-	print(f"3D volume {pair3d[0]} -> pid {pid}, week {week}, {len(slices)} 2D slices")
 	return sorted(slices, key=lambda p: int(slice_key(p[0])[2]))
 
 
 def main():
 	ap = argparse.ArgumentParser()
-	ap.add_argument("--weights2d", default="./outputs/can2d_best.pt", help="path to the CAN2D .pt file")
-	ap.add_argument("--weights3d", default="./outputs/can3d_best.pt", help="path to the CAN3D .pt file")
+	ap.add_argument("--weights2d", default="./models/can2d_best.pt", help="path to the CAN2D .pt file")
+	ap.add_argument("--weights3d", default="./models/can3d_best.pt", help="path to the CAN3D .pt file")
 	ap.add_argument("--scale2d", type=float, default=0.5, help="must match CAN2D training")
 	ap.add_argument("--scale3d", type=float, default=0.5, help="must match CAN3D training")
 	ap.add_argument("--cls", type=int, default=5, help="Class to plot metrics of (5=prostate)")
@@ -371,55 +377,54 @@ def main():
 	device = get_device()
 
 	# Evaluate both models' Dice, IoU, over -and under contouring for every class (except background)
-	runs = {}
+	runs = {} # Holds dataset and metrics of entire testset for both models
 	for dim, weights, scale in ((3, args.weights3d, args.scale3d), (2, args.weights2d, args.scale2d)):
 		model = load_model(weights, dim, device)
 		dataset = load_test_set(dim, args.data_root, scale)
 
-		if dim == 2:
-			plot_item(model,dataset,7,device, dim, args.cls, 20, False) # Patient 7 of 2d test set is a great example of over-contouring
+		metric_results = metrics_from_conf(evaluate(model, dataset, dim, device)) # Evaluate runs on whole testset
+		runs[dim] = dict(label=f"CAN{dim}D", model=model, dataset=dataset, metrics=metric_results)
+		print_table(f"CAN{dim}D", metric_results)
 
-			pairs = load_test_set(3, args.data_root, args.scale3d).pairs   # 3D pairs, to get patient/week
-			slices = matching_slices(args.data_root, pairs[0])     # sorted, one patient/week only
-			ds_patient = HipMRI2D(slices, scale)
-			for i in range(len(ds_patient)):
-				plot_item(model, ds_patient, i, device, dim, args.cls, i)
-		else:
-			plot_item(model, dataset, 0, device, dim, args.cls, 61)
+	# Run both models on a complete volume / set of slices
+	pairs = load_test_set(3, args.data_root, args.scale3d).pairs # 3D pairs, to get patient/week
+	slices = matching_slices(args.data_root, pairs[0]) # sorted, one patient/week only
+	ds_patient = HipMRI2D(slices, scale)
+	for i in range(len(ds_patient)):
+		plot_item(model, ds_patient, i, device, dim, args.cls, i)
+	for i in range(128):
+		plot_item(model, dataset, 0, device, dim, args.cls, 61)
 
-		# metric_results = metrics_from_conf(evaluate(model, dataset, dim, device)) # Evaluate runs on whole testset
-		# runs[dim] = dict(label=f"CAN{dim}D", model=model, dataset=dataset, metrics=metric_results)
-		# print_table(f"CAN{dim}D", metric_results)
-
-	# compare_slice_metrics(
-	# runs,
-	# args.data_root,
-	# args.vol,
-	# args.cls,
-	# device,
-	# args.scale2d
-	# )
+	# Plot per-slice metrics
+	compare_slice_metrics(
+	runs,
+	args.data_root,
+	args.vol,
+	args.cls,
+	device,
+	args.scale2d
+	)
 
 	# Visualization of 2D vs 3D segmentation
-	# cases = []
-	# for dim in (3, 2):
-	# 	r = runs[dim]
-	# 	cases += run_cases(r["model"], r["ds"], dim, r["label"], args.cls, args.n, device)
-	# for c in cases:
-	# 	print(f'{c["label"]} item {c["index"]}, {CLASS_NAMES[args.cls]}: '
-	# 		  f'IoU {c["iou"]:.3f}  over {c["over"]:.1f}%  under {c["under"]:.1f}%')
-	# plot_cases(cases, os.path.join(args.out, "cases.png"))
+	cases = []
+	for dim in (3, 2):
+		runs_dim = runs[dim]
+		cases += run_cases(runs_dim["model"], runs_dim["dataset"], dim, runs_dim["label"], args.cls, args.n, device)
+	for c in cases:
+		print(f'{c["label"]} item {c["index"]}, {CLASS_NAMES[args.cls]}: '
+			  f'IoU {c["iou"]:.3f}  over {c["over"]:.1f}%  under {c["under"]:.1f}%')
+	plot_cases(cases, os.path.join(args.out, "cases.png"))
 
 	# per-class Dice, 2D vs 3D
-	# plot_dice_comparison(runs[2]["metrics"], runs[3]["metrics"], os.path.join(args.out, "dice_comparison.png"))
+	plot_dice_comparison(runs[2]["metrics"], runs[3]["metrics"], os.path.join(args.out, "dice_comparison.png"))
 
 	# Run inference time and memory usage for both models
-	# x3d = runs[3]["ds"][0][0][None]    # (1, 1, D, H, W): one test volume
-	# x2d = x3d[0].permute(1, 0, 2, 3)   # (D, 1, H, W): the same volume as D slices in one batch
+	x3d = runs[3]["dataset"][0][0][None]    # (1, 1, D, H, W): one test volume
+	x2d = x3d[0].permute(1, 0, 2, 3)   # (D, 1, H, W): the same volume as D slices in one batch
 
-	# for name, model, x in (("CAN3D", runs[3]["model"], x3d), ("CAN2D", runs[2]["model"], x2d)):
-	# 	mean, std, mem = time_mem_inference(model, x, device)
-	# 	print(f"{name}: {mean*1000:.1f} +/- {std*1000:.1f} ms per volume, peak {mem:.0f} MB")
+	for name, model, x in (("CAN3D", runs[3]["model"], x3d), ("CAN2D", runs[2]["model"], x2d)):
+		mean, std, mem = time_mem_inference(model, x, device)
+		print(f"{name}: {mean*1000:.1f} +/- {std*1000:.1f} ms per volume, peak {mem:.0f} MB")
 
 if __name__ == "__main__":
 	main()

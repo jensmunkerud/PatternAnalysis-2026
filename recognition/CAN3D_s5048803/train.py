@@ -15,6 +15,7 @@ from modules import CAN
 from dataset import (get_pairs, split_pairs, HipMRI3D, get_slices, HipMRI2D,
 					 NUM_CLASSES, RANGPUR_MODE)
 
+
 def one_hot(t):
 	return F.one_hot(t, NUM_CLASSES).movedim(-1, 1).float()
 
@@ -49,12 +50,19 @@ def main():
 	ap.add_argument("--scale", type=float, default=None, help="Scaling factor applied to image before the model. default 0.5")
 	ap.add_argument("--batch", type=int, default=16, help="slices per batch (2D only)")
 	ap.add_argument("--overfit", type=int, default=0, help="train+val on N items")
-	ap.add_argument("--out", default="outputs", help="Ensure the output folder exists beforehand!")
+	ap.add_argument("--out", default="models", help="Ensure the output folder exists beforehand!")
 	ap.add_argument("--data_root", default="/home/groups/comp3710/HipMRI_Study_open" if RANGPUR_MODE else ".")
 	ap.add_argument("--workers", type=int, default=4, help="DataLoader worker processes")
 	ap.add_argument("--width", type=int, default=24, help="Width of the network (default 24)")
+	ap.add_argument("--seed", type=int, default=-1, help="Random seed, if >=0 the training is deterministic and seed is used")
 	args = ap.parse_args()
 	os.makedirs(args.out, exist_ok=True)
+
+	if args.seed >= 0:
+		torch.manual_seed(args.seed)
+		torch.cuda.manual_seed_all(args.seed)
+		torch.backends.cudnn.deterministic = True
+		torch.backends.cudnn.benchmark = False
 
 	dim = 3 if args.model == "can3d" else 2
 	if args.scale is None:

@@ -42,45 +42,80 @@ This Context Aggregation Network (CAN) is an advanced machine learning model tha
 
 The model can be used to give a rough estimate of the segmentation of different organs and tissues, though this exact model is only tested on the 6 classes previously mentioned. It could speed up manual segmentation by medical personnell and increase existing datasets.
 
-## Dependencies
 
-`torch ≥ 2.14.0`
-`torchvision ≥ 0.29.0`
-`numpy ≥ 1.26.4`
-`nibabel ≥ 5.4.2`
-`matplotlib ≥ 3.10.8`
-`tqdm ≥ 4.70.1`
-A requirements.txt is included
+## Preparing the dataset
+
+* The 3D dataset, 256x256x128 NIfTI: [Labelled weekly MR images of the male pelvis](https://data.csiro.au/collection/csiro:51392v2).
+* The 2D dataset, 256x128 (256x144) NIfTI: Provided by COMP3710 staff at UQ (access restricted to UQ students), or manually sliced from the 3D dataset.
+
+The 3D dataset contains 38 patients with 3D MRI scans from several consecutive weeks, totaling 211 samples. The 2D dataset are extracted slices from these 3D volumes split along the coronal (front-back) plane. They are already split into 11460 for training 660 for validation and 540 for test, totaling 12660 samples. This leads to a slightly lower validate / test split than a usual 60/20/20. The 2D dataset does not contain the same patient in multiple splits. `dataset.py` therefore compares the patient ID of the 2D and 3D datasets and splits the 3D dataset in the same way. While most slices are 256x128, some are 256x144 so padding is added to the 2D dataset to ensure common resolution of 256x144.
+
+**Both the 2D dataset and 3D dataset are scaled down to 1/2 size (the `--scale` parameter in `train.py`) to improve memory usage and training time.**
+
+Below is the patient IDs of the pre-split 2D dataset, printed by `dataset.py`. \
+`train{'008', '019', '016', '020', '010', '011', '007', '012', '025', '032', '024', '027', '018', '026', '021', '013', '033', '006', '035', '030', '029', '015', '017', '022', '005', '023', '031', '004', '028', '009', '014'} val{'038', '039', '037', '036'} test{'040', '042', '041'}`
+
+The following is the patient IDs of the split made by the 3D dataset, proving there is no leakage and that it perfectly reflects the same patient split as the 2D set. \
+`{'train': {'035', '013', '029', '024', '010', '007', '011', '031', '020', '021', '015', '017', '008', '025', '030', '014', '032', '016', '019', '005', '012', '033', '009', '004', '022', '026', '023', '027', '018', '028', '006'}, 'val': {'039', '036', '038', '037'}, 'test': {'042', '041', '040'}}`
+
+This gives the following splits
+
+| MODEL | TRAIN        | VALIDATE     | TEST      | TOTAL  |
+| ----- | ------------ | ------------ | --------- | ------ |
+| CAN2D | 90.5%, 11460 | 5.2%, 660    | 4.2%, 540 | 12 660 |
+| CAN3D | 90.5%, 211   | 5.2%, 11     | 4.3%, 9   | 211    |
+
 
 ## Reproducibility
 
-The model has been trained using the following command. To train the 2D model, use `--model can2d` instead. The scaling factor indicates the scale of the data before it enters the network.
-More of the command-line arguments can be found in `train.py`.
+### Dependencies
+
+`torch ≥ 2.14.0` \
+`numpy ≥ 1.26.4` \
+`nibabel ≥ 5.4.2` \
+`matplotlib ≥ 3.10.8` \
+A requirements.txt is included
+
+### Setting up the repository and virtual environment
+```bash
+git clone https://github.com/shakes76/PatternAnalysis-2026.git
+cd PatternAnalysis-2026
+git checkout topic-recognition
+cd recognition/CAN3D_s5048803
+
+conda create -n can3d python=3.12 -y
+conda activate can3d
+pip install -r requirements.txt
+```
+
+### Training the model
+The model has been trained using the following command. To train the 2D model, use `--model can2d` instead. The scaling factor indicates the scale of the data before it enters the network, and 0.5 is chosen to keep the training fast and light. More command-line arguments can be found in `train.py`.
 
 ```bash
 python train.py --epochs 20 --scale 0.5 --model can3d
 ```
 
-## Preparing the dataset
+Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are from a 16GB M2 Mac.
+Note: The per-class dice is volatile after ~5 epochs for both models, but the loss keeps decreasing hence they is still improving overall.
 
-The 3D dataset contains 38 patients with 3D MRI scans from several consecutive weeks, totaling 211 samples. The 2D dataset has extracted 2D slices of this same dataset and is already split into 11460 for training 660 for validation and 540 for test, totaling 12660 samples. The 2D dataset does not contain a single patient in multiple splits. `dataset.py` therefore compares the patient ID of the 2D and 3D datasets and splits the 3D dataset in the same way, dropping the sample if it does not find a perfect match. Padding is also added to the 2D dataset to ensure common resolution of 128x64 (some slices are 128x144).
+<p align="center">
+  <img src="./results/can2d_training.png" width="45%" />
+  <img src="./results/can3d_training.png" width="45%" />
+</p>
 
 
-Below is the patient ids of the pre-split 2D dataset, taken from the `dataset.py`.
-`train{'008', '019', '016', '020', '010', '011', '007', '012', '025', '032', '024', '027', '018', '026', '021', '013', '033', '006', '035', '030', '029', '015', '017', '022', '005', '023', '031', '004', '028', '009', '014'} val{'038', '039', '037', '036'} test{'040', '042', '041'}`
+### Running inference
+After obtaining the `can2d_best.pt` and `can3d_best.pt`, generate the model results by running:
+```bash
+python predict.py
+```
+This will measure inference runtime / memory, segment a complete MRI volume and print metrics among other things for both 2D and 3D models. The results are then placed in the `results` folder.
 
-The following is the split made by the 3D dataset, proving there is no leakage and that it perfectly reflects the same patient split as the 2D set.
-`{'train': {'035', '013', '029', '024', '010', '007', '011', '031', '020', '021', '015', '017', '008', '025', '030', '014', '032', '016', '019', '005', '012', '033', '009', '004', '022', '026', '023', '027', '018', '028', '006'}, 'val': {'039', '036', '038', '037'}, 'test': {'042', '041', '040'}}`
-
-Note: The per-class dice is volatile after ~5 epochs, but the loss keeps decreasing hence the model is still improving overall.
-![2d model training](./results/can2d_training.png)
-![3d model training](./results/can3d_training.png)
 
 ## Results
 
 The 3D dataset is shown here segmenting in the transversal (top-down) plane while the 2D dataset is locked in the coronal (front-back) plane. In later direct comparisons they will both be ran in the coronal plane.
 ![Per-slice data](./results/cases.png)
-
 
 #### Slice metrics for volume 0 in test set
 
@@ -90,14 +125,9 @@ The 3D dataset is shown here segmenting in the transversal (top-down) plane whil
 
 ![Per-slice data](./results/can_depth_comparison_vol2.png)
 
-Training has been done on a Nvidia A100 40GB GPU, while inference and prediction metrics are made on a 16GB M2 Mac.
-
-![2d training](./results/can2d_training.png)
-![3d training](./results/can3d_training.png)
-
 ### Resource profiling
 
-| TYPE  | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
+| MODEL | PARAMETERS | WIDTH | EPOCHS | TRAINING TIME | TRAIN MEMORY USAGE | INFERENCE TIME [ms] | INFERENCE MEMORY [MB] |
 | ----- | ---------- | ----- | ------ | ------------- | ------------------ | ------------------- | --------------------- |
 | CAN2D | 21 222     | 24    | 20     | 00:15:30      | 1743540K = 1.7GB   | 94.5 +/- 0.3        | 1131                  |
 | CAN3D | 63 126     | 24    | 20     | 00:10:19      | 3384672K = 3.3GB   | 935.5 +/- 5.6       | 1155                  |
@@ -113,10 +143,10 @@ The `compare_slice_metrics()` in `predict.py` calculates four metrics per slice 
 
 ### Small prostate
 
-At the base / apex of the prostate, the segmentation is very small. The 2D model performs very badly when at these parts of the prostate, as shown below
+At the prostate, the segmentation is very small. The 2D model performs very badly when at these parts of the prostate, as shown below
 
-![2d small artifact](./results/can2d_overcontouringg.png)
-![3d small artifact](./results/can2d_overcontouringg.png)
+![2d small artifact](./results/can2d_overcontouring.png)
+![3d small artifact](./results/can3d_overcontouring.png)
 
 ### Stray floating artifacts
 
@@ -126,13 +156,13 @@ For a given layer the CAN2D baseline model seems to be experiencing a lot more a
 ![3D model segmentation / metrics through slices](./results/3d_slices.gif)
 ![2D model segmentation / metrics through slices](./results/2d_slices.gif)
 
-
 ### Recommendations
 
 Actionable engineering recommendation and trade-off synthesis for your project manager.
-The results have shown that the 2D model vs 3D 
+The results have shown that the 2D model vs 3D
 There is a lot of headroom to use more memory for both of the models, both for training and inference. They both suffer from stray artifacts which I think this should solve.
 Seeing as the memory cost and inference runtime is still manageable, I see no reason not to continue developing the CAN3D model further.
+
 ## Notes
 
 * The loss function uses Cross-Entropy for optimal discrete segmentation performance
@@ -141,8 +171,6 @@ Seeing as the memory cost and inference runtime is still manageable, I see no re
 * Uses one-hot encoding to avoid falsely ranking the order of different classes
 * Adam optimizer
 * The model does not prefer a class over any other, exploiting the added context to better the performance
-
-
 
 ## Feasibility report
 
@@ -202,7 +230,7 @@ I ran a mock training of the CAN3D model with 15 epochs, and got the following f
 Results from running the CAN3D model on 4 samples. We clearly see the low resolution of the data, but the model shows
 promising results considering this took less than 10min to train in only 15 epochs.
 
-![alt text](outputs/can3d_predictions.png)
+![Plot comparing 2d and 3d model](results/cases.png)
 
 ### Risks, Budget & Fallback
 
